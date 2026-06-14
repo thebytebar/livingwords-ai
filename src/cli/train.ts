@@ -6,16 +6,18 @@ import { configs } from '../core/config.js';
 
 program
   .name('lw-llm train')
-  .description('Train LivingWords LLM on a dataset (character-level GPT)')
-  .option('-d, --data <path>', 'Path to training data (.txt)', 'data/bible.txt')
-  .option('-e, --epochs <number>', 'Number of full passes over the data', '1')
-  .option('--max-iter <number>', 'Total training steps (very useful with small data)', '800')
+  .description('Train LivingWords LLM on a dataset')
+  .option('-d, --data <path>', 'Path to training data', 'data/pretrain_bible.txt')
+  .option('-m, --model <name>', 'Model config (pico | nano | theoSmall)', 'theoSmall')
+  .option('-e, --epochs <number>', 'Number of epochs', '3')
+  .option('--max-iter <number>', 'Total training steps', '1500')
   .option('--batch-size <number>', 'Batch size', '16')
-  .option('--lr, --learning-rate <number>', 'Adam learning rate', '0.001')
-  .option('--eval-interval <number>', 'How often to print loss + generated samples', '100')
-  .option('--save-interval <number>', 'Save checkpoint every N steps (for long runs)', '500')
+  .option('--lr, --learning-rate <number>', 'Learning rate', '0.0008')
+  .option('--eval-interval <number>', 'Eval interval', '100')
+  .option('--save-interval <number>', 'Save interval', '400')
   .action(async (options) => {
-    const model = new LivingWordsLLM(configs.pico);
+    const modelConfig = (configs as any)[options.model] || configs.theoSmall;
+    const model = new LivingWordsLLM(modelConfig);
 
     const trainOpts = {
       epochs: parseInt(options.epochs, 10),
@@ -27,7 +29,7 @@ program
     };
 
     await model.train(options.data, trainOpts);
-    console.log('✅ Training session complete. Model ready for generation.');
+    console.log('✅ Training session complete.');
   });
 
 program.parse();

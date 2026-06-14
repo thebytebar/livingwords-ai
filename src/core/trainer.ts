@@ -4,7 +4,10 @@
  * Inspired by homemade-gpt-js and Karpathy's nanoGPT.
  */
 
-import * as tf from '@tensorflow/tfjs-node';
+import * as tf from '@tensorflow/tfjs';
+// Optional: use native backend for speed if @tensorflow/tfjs-node is installed
+// @ts-ignore - optional, not listed in dependencies
+import('@tensorflow/tfjs-node').catch(() => {});
 import { createDataset } from './dataset.js';
 import { GPT } from './gpt-model.js';
 import { ModelConfig } from './config.js';
@@ -18,6 +21,18 @@ export interface TrainOptions {
   maxIter?: number;
   /** Optional callback invoked when a checkpoint should be saved (e.g. every saveInterval steps) */
   saveCheckpoint?: (model: any, step: number) => void | Promise<void>;
+}
+
+// Helper to format elapsed time
+function formatElapsedTime(ms: number): string {
+  const totalSeconds = Math.floor(ms / 1000);
+  const minutes = Math.floor(totalSeconds / 60);
+  const seconds = totalSeconds % 60;
+
+  if (minutes > 0) {
+    return `${minutes}m ${seconds}s`;
+  }
+  return `${seconds}s`;
 }
 
 export async function trainLivingWordsLLM(
@@ -38,9 +53,11 @@ export async function trainLivingWordsLLM(
   console.log(`🙏 Starting God-centered training for LivingWords LLM on ${dataPath}`);
   console.log(`Config: ${config.nLayer} layers, ${config.nEmbd} embd, blockSize=${config.blockSize}`);
 
+  const startTime = Date.now();
+
   // Create dataset
-  const text = await fetchText(dataPath); // Assume helper or read file
-  const dataset = await createDataset({ textSource: text, maskZero: true });
+  const text = await fetchText(dataPath);
+  const dataset = await createDataset({ textSource: text, maskZero: true, useSubword: config.vocabSize > 256, vocabSize: config.vocabSize });
 
   // Build model
   const model = GPT({
@@ -76,14 +93,22 @@ export async function trainLivingWordsLLM(
       const lossValue: number = (lossData as Float32Array | number[])[0] ?? 0;
 
       // Backward + optimize
-      optimizer.minimize(() => model.loss(x, y) as any); // tfjs handles grads
+      optimizer.minimize(() => model.loss(x, y) as any);
 
       lossTensor.dispose();
       x.dispose();
       y.dispose();
 
+      // Training progress indicator with elapsed time
+      if (iter % 10 === 0 && iter % evalInterval !== 0) {
+        const elapsed = formatElapsedTime(Date.now() - startTime);
+        process.stdout.write(`\r⏳ Training step ${iter}/${maxIter} | Elapsed: ${elapsed}`);
+      }
+
       if (iter % evalInterval === 0) {
-        console.log(`Step ${iter} | Loss: ${lossValue.toFixed(4)}`);
+        if (iter % 10 === 0) process.stdout.write('\n');
+        const elapsed = formatElapsedTime(Date.now() - startTime);
+        console.log(`Step ${iter} | Loss: ${lossValue.toFixed(4)} | Elapsed: ${elapsed}`);
 
         // Real sample generation using current model + dataset tokenizer
         try {
@@ -113,7 +138,8 @@ export async function trainLivingWordsLLM(
     }
   }
 
-  console.log('✅ Training complete. Model is now aligned for faithful generation.');
+  const totalElapsed = formatElapsedTime(Date.now() - startTime);
+  console.log(`✅ Training complete. Total time: ${totalElapsed}`);
   return model;
 }
 
@@ -123,7 +149,7 @@ async function fetchText(path: string): Promise<string> {
   try {
     return await fs.readFile(path, 'utf8');
   } catch {
-    return "In the beginning God created the heavens and the earth. " + 
+    return "In the beginning God created the heavens and the earth. " +
            "The Bible is the inspired Word of God. Let everything that has breath praise the Lord.";
   }
 }

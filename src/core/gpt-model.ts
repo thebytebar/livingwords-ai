@@ -6,9 +6,12 @@
  * for alignment with Christian doctrine. Contributions welcome for theological safeguards.
  */
 
-import * as tf from '@tensorflow/tfjs-node'
-import { Layer, Model, ModelParams } from './types.js'
-import { countParams, dispose, withLayerHelpers, withModelHelpers } from './utils.js'
+import * as tf from '@tensorflow/tfjs';
+// Optional: use native backend for speed if @tensorflow/tfjs-node is installed
+// @ts-ignore - optional, not listed in dependencies
+import('@tensorflow/tfjs-node').catch(() => {});
+import { Layer, Model, ModelParams } from './types.js';
+import { countParams, dispose, withLayerHelpers, withModelHelpers } from './utils.js';
 
 // GPT Language Model
 export function GPT(params: ModelParams): Model {
@@ -22,7 +25,7 @@ export function GPT(params: ModelParams): Model {
     drop: tf.layers.dropout({ name: 'drop', rate: embdDropout }),
     add: tf.layers.add({ name: 'add' }),
     h: Array.from({ length: nLayer }, (_, i) => Block({ nEmbd, nHead, blockSize, attnDropout, residDropout, nLayer, name: `block${i + 1}` })),
-    lnF: tf.layers.layerNormalization({ name: 'lnF' }),
+    lnF: (tf.layers as any).layerNormalization({ name: 'lnF' }),
   }
   const lmHead = tf.layers.dense({ name: 'lmHead', units: vocabSize, useBias: false, kernelInitializer })
 
@@ -98,7 +101,7 @@ export function GPT(params: ModelParams): Model {
         idx = idx.concat(idxNext, 1)
 
         if (onGenerateChar) {
-          const nextToken = ((await idxNext.array()) as number[][])[0][0]
+          const nextToken = ((await (idxNext as any).array()) as number[][])[0][0]
           onGenerateChar(nextToken)
         }
 
@@ -122,18 +125,41 @@ export function GPT(params: ModelParams): Model {
       const paramsCount = countParams([ wte, wpe, add, drop, lnF, ...h ])
       return { params: paramsCount }
     }),
+
+    // sequenceLogProb for DPO support
+    sequenceLogProb: async (tokens: number[]): Promise<number> => {
+      if (!tokens || tokens.length < 2) return 0;
+
+      return tf.tidy(() => {
+        const context = tokens.slice(0, -1);
+        const target = tokens[tokens.length - 1];
+
+        let padded = context;
+        if (padded.length > blockSize) padded = padded.slice(-blockSize);
+        if (padded.length < blockSize) {
+          padded = Array(blockSize - padded.length).fill(0).concat(padded);
+        }
+
+        const idx = tf.tensor([padded], [1, blockSize], 'int32');
+        const logits = model.apply(idx) as tf.Tensor;
+        const pos = blockSize - 1;
+        const lastLogits = logits.slice([0, pos, 0], [-1, 1, -1]).squeeze([0, 1]);
+        const logProbs = tf.logSoftmax(lastLogits);
+        const logProb = logProbs.slice([target], [1]).dataSync()[0] as number;
+        return logProb;
+      });
+    },
   }
 
   return withModelHelpers(model, [transformer.wte, transformer.wpe, transformer.add, transformer.drop, transformer.lnF, transformer.h, lmHead])
 }
 
-// Transformer Block, CausalSelfAttention, FeedForward functions (full port)
 function Block(args: any): Layer {
   const { nEmbd, nHead, blockSize, residDropout, attnDropout, nLayer, name } = args
 
-  const ln1 = tf.layers.layerNormalization({ name: `${name}-ln1` })
+  const ln1 = (tf.layers as any).layerNormalization({ name: `${name}-ln1` })
   const attn = CausalSelfAttention({ name: `${name}-attn`, nEmbd, blockSize, nHead, residDropout, attnDropout, nLayer })
-  const ln2 = tf.layers.layerNormalization({ name: `${name}-ln2` })
+  const ln2 = (tf.layers as any).layerNormalization({ name: `${name}-ln2` })
   const mlp = FeedForward({ name: `${name}-mlp`, nEmbd, residDropout, nLayer })
 
   const block = {
@@ -159,7 +185,7 @@ function CausalSelfAttention(args: any): Layer {
   const attnDrop = tf.layers.dropout({ name: `${name}-attnDrop`, rate: attnDropout })
   const residDrop = tf.layers.dropout({ name: `${name}-residDrop`, rate: residDropout })
 
-  const bias = tf.linalg.bandPart(tf.ones([blockSize, blockSize]), -1, 0).reshape([1, 1, blockSize, blockSize])
+  const bias = (tf as any).linalg.bandPart(tf.ones([blockSize, blockSize]), -1, 0).reshape([1, 1, blockSize, blockSize])
 
   const multiHeadAttention: Layer = {
     apply: (x: tf.Tensor): tf.Tensor => tf.tidy(() => {
@@ -204,7 +230,6 @@ function FeedForward(args: any): Layer {
   return withLayerHelpers(ffwd, [cFc, cProj, drop])
 }
 
-// Initializers
 const embeddingsInitializer = tf.initializers.randomNormal({ mean: 0.0, stddev: 0.02 })
 const projectionKernelInitializer = (nLayer: number) => tf.initializers.randomNormal({ mean: 0.0, stddev: 0.02 / Math.sqrt(2 * nLayer) })
 const kernelInitializer = tf.initializers.randomNormal({ mean: 0.0, stddev: 0.02 })

@@ -1,5 +1,5 @@
-import * as tf from '@tensorflow/tfjs-node'
-import { Layer, LayerLike, Model, NumericWeights, LayerChildren, Weights } from './types.js'
+import * as tf from '@tensorflow/tfjs';
+import { Layer, LayerLike, Model, NumericWeights, LayerChildren, Weights } from './types.js';
 
 export function withModelHelpers(model: Model, children: LayerChildren): Model {
   return {
@@ -53,7 +53,7 @@ export function countParams(layers: LayerLike[]): number {
 
 async function getWeights(layer: tf.layers.Layer): Promise<NumericWeights> {
   const promisedWeights = layer.getWeights() || []
-  const resolvedWeights = await Promise.all(promisedWeights.map((w: tf.Tensor) => w.array()))
+  const resolvedWeights = await Promise.all(promisedWeights.map((w: any) => w.array()))
   return resolvedWeights as any
 }
 

@@ -1,4 +1,4 @@
-import * as tf from '@tensorflow/tfjs-node';
+import * as tf from '@tensorflow/tfjs';
 
 export interface ModelParams {
   nLayer: number;
@@ -23,6 +23,7 @@ export interface Model {
   dispose?: () => void;
   getWeights?: () => Promise<any>;
   setWeights?: (weights: any) => void;
+  sequenceLogProb?: (tokens: number[]) => Promise<number>;
 }
 
 export interface Layer {
@@ -34,7 +35,7 @@ export interface Layer {
 
 export type LayerLike = tf.layers.Layer | Layer | null | undefined;
 export type LayerChildren = Array<LayerLike | LayerLike[]>;
-export type NumericWeights = any; // array of numbers from .array()
+export type NumericWeights = any;
 export type Weights = Record<string, NumericWeights>;
 
 // High-level config for LivingWordsLLM (user-facing, from config.ts)
@@ -50,6 +51,8 @@ export interface ModelConfig {
 export interface DatasetParams {
   textSource?: string;
   maskZero?: boolean;
+  useSubword?: boolean;
+  vocabSize?: number;
 }
 
 export interface DatasetGetBatchParams {
@@ -77,3 +80,15 @@ export interface LivingWordsModel {
   build: () => void;
   summary: () => { params: number };
 }
+
+export interface SFTExample {
+  text: string;
+}
+
+export interface PreferenceExample {
+  prompt: string;
+  chosen: string;
+  rejected: string;
+}
+
+export type PostTrainMode = 'pretrain' | 'sft' | 'dpo';

@@ -1,5 +1,8 @@
-import * as tf from '@tensorflow/tfjs-node';
-import { ModelConfig } from './config.js';
+import * as tf from '@tensorflow/tfjs';
+// Optional: use native backend for speed if user has explicitly installed @tensorflow/tfjs-node
+// @ts-ignore - optional, not listed in dependencies
+import('@tensorflow/tfjs-node').catch(() => {});
+import { ModelConfig, configs } from './config.js';
 import { GPT } from './gpt-model.js';
 import { createDataset } from './dataset.js';
 import type { TrainOptions } from './trainer.js';
@@ -11,13 +14,13 @@ interface Tokenizer {
 
 export class LivingWordsLLM {
   private config: ModelConfig;
-  private gpt: any = null; // GPT model instance from gpt-model
+  private gpt: any = null;
   private isBuilt: boolean = false;
   private tokenizer: Tokenizer | null = null;
   private vocabulary: string[] = [];
   private effectiveVocabSize: number = 0;
 
-  constructor(config: ModelConfig) {
+  constructor(config: ModelConfig = configs.theoSmall) {
     this.config = { ...config };
     console.log('🌟 LivingWordsLLM initialized with God-centered config:', this.config);
   }
@@ -34,16 +37,20 @@ export class LivingWordsLLM {
 
   private async initTokenizer(dataPath: string = 'data/bible.txt'): Promise<void> {
     const text = await this.fetchText(dataPath);
-    const ds = await createDataset({ textSource: text, maskZero: true });
+    const useSubword = this.config.vocabSize > 256;
+    const ds = await createDataset({
+      textSource: text,
+      maskZero: true,
+      useSubword,
+      vocabSize: this.config.vocabSize,
+    });
     this.vocabulary = [...ds.vocabulary];
     this.tokenizer = {
       encode: ds.encode.bind(ds),
       decode: ds.decode.bind(ds),
     };
     this.effectiveVocabSize = ds.vocabSize;
-    // Align our config for builds
     this.config = { ...this.config, vocabSize: ds.vocabSize };
-    // Dispose the dataset tensors (encode/decode close over maps we need)
     ds.dispose();
   }
 
@@ -92,6 +99,7 @@ export class LivingWordsLLM {
       nEmbd: this.config.nEmbd,
       nHead: this.config.nHead,
       nLayer: this.config.nLayer,
+      useSubword: this.config.vocabSize > 256,
       savedAt: new Date().toISOString(),
     }, { spaces: 2 });
     console.log(`💾 Saved weights + vocab to ${weightsDir}/`);
@@ -110,7 +118,6 @@ export class LivingWordsLLM {
     const meta = await fse.readJson(mFile);
     const weights = await fse.readJson(wFile);
 
-    // Rebuild tokenizer from saved vocabulary (assumes same maskZero=1 shift)
     const vocab: string[] = meta.vocabulary || [];
     const stoi: Record<string, number> = {};
     const itos: Record<number, string> = {};
@@ -127,7 +134,6 @@ export class LivingWordsLLM {
     };
     this.effectiveVocabSize = meta.vocabSize || vocab.length;
 
-    // Prepare config for this vocab/block
     this.config = {
       ...this.config,
       vocabSize: this.effectiveVocabSize,
@@ -145,21 +151,21 @@ export class LivingWordsLLM {
     return true;
   }
 
-  /**
-   * Train the model.
-   * You can pass a number for epochs (backward compatible) or a full options object.
-   */
   async train(dataPath: string, epochsOrOptions: number | TrainOptions = 1): Promise<void> {
-    // Normalize options
     const options: TrainOptions = typeof epochsOrOptions === 'number'
       ? { epochs: epochsOrOptions }
       : { ...epochsOrOptions };
 
     const epochs = options.epochs ?? 1;
 
-    // Ensure we have tokenizer derived from the *training* data for consistency
     const text = await this.fetchText(dataPath);
-    const ds = await createDataset({ textSource: text, maskZero: true });
+    const useSubword = this.config.vocabSize > 256;
+    const ds = await createDataset({
+      textSource: text,
+      maskZero: true,
+      useSubword,
+      vocabSize: this.config.vocabSize,
+    });
     this.vocabulary = [...ds.vocabulary];
     this.tokenizer = { encode: ds.encode.bind(ds), decode: ds.decode.bind(ds) };
     this.effectiveVocabSize = ds.vocabSize;
@@ -169,18 +175,14 @@ export class LivingWordsLLM {
 
     const { trainLivingWordsLLM } = await import('./trainer.js');
 
-    // Callback for periodic checkpoints during long runs.
-    // We capture the current tokenizer state (vocabulary) via `this`.
     const saveCheckpoint = async (ckptModel: any, step: number) => {
       this.gpt = ckptModel;
       const padded = String(step).padStart(5, '0');
       const ckptDir = `weights/checkpoint-${padded}`;
       await this.save(ckptDir);
-      // Also keep an easy-to-find "latest" checkpoint for convenience
       await this.save('weights/latest');
     };
 
-    // Forward rich training options (maxIter, batchSize, learningRate, etc.)
     const trainedModel = await trainLivingWordsLLM(this.config, dataPath, {
       epochs,
       maxIter: options.maxIter ?? 800,
@@ -196,9 +198,7 @@ export class LivingWordsLLM {
     ds.dispose();
 
     console.log('📖 Training aligned with biblical doctrine. Ready for faithful generation.');
-    // Final canonical save to weights/
     await this.save();
-    // Ensure "latest" always reflects the fully completed training run
     await this.save('weights/latest');
   }
 
@@ -222,7 +222,7 @@ export class LivingWordsLLM {
         doSample: true,
       });
 
-      const arr = (await (outIdx as tf.Tensor).array()) as number[][];
+      const arr = (await (outIdx as any).array()) as number[][];
       const generated = this.tokenizer.decode(arr[0] || []);
       tf.dispose([idx, outIdx]);
       return generated;

@@ -1,15 +1,15 @@
 export interface ModelConfig {
   vocabSize: number;
-  nEmbd: number; // embedding dimension (was nEmb)
+  nEmbd: number;
   nHead: number;
   nLayer: number;
-  blockSize: number; // context length
+  blockSize: number;
   dropout?: number;
 }
 
 export const configs = {
   pico: {
-    vocabSize: 256, // char-level
+    vocabSize: 256,
     nEmbd: 64,
     nHead: 4,
     nLayer: 3,
@@ -24,5 +24,14 @@ export const configs = {
     blockSize: 256,
     dropout: 0.1,
   } as ModelConfig,
-  // Add more as needed
+  // Optimized theoSmall config targeting ~500k parameters
+  // with small-vocab subword tokenization
+  theoSmall: {
+    vocabSize: 1536,
+    nEmbd: 96,
+    nHead: 6,
+    nLayer: 6,
+    blockSize: 256,
+    dropout: 0.1,
+  } as ModelConfig,
 };
