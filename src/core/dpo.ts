@@ -3,7 +3,7 @@
  * Minimal implementation suitable for the tiny char-level model.
  */
 
-import * as tf from '@tensorflow/tfjs';
+import * as tf from './tf.js';
 import { PreferenceExample } from './types.js';
 import { GPT } from './gpt-model.js';
 import { ModelConfig } from './config.js';

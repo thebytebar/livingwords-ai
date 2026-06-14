@@ -2,7 +2,7 @@
  * Dataset supporting both legacy char-level and tiktoken subword tokenization.
  */
 
-import * as tf from '@tensorflow/tfjs';
+import * as tf from './tf.js';
 import { Dataset, DatasetParams, DatasetGetBatchParams } from './types.js';
 import { createSmallTiktokenTokenizer, Tokenizer } from './tokenizer.js';
 

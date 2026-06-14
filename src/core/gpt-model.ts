@@ -6,10 +6,7 @@
  * for alignment with Christian doctrine. Contributions welcome for theological safeguards.
  */
 
-import * as tf from '@tensorflow/tfjs';
-// Optional: use native backend for speed if @tensorflow/tfjs-node is installed
-// @ts-ignore - optional, not listed in dependencies
-import('@tensorflow/tfjs-node').catch(() => {});
+import * as tf from './tf.js';
 import { Layer, Model, ModelParams } from './types.js';
 import { countParams, dispose, withLayerHelpers, withModelHelpers } from './utils.js';
 

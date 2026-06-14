@@ -1,4 +1,4 @@
-import * as tf from '@tensorflow/tfjs';
+import * as tf from './tf.js';
 import { Layer, LayerLike, Model, NumericWeights, LayerChildren, Weights } from './types.js';
 
 export function withModelHelpers(model: Model, children: LayerChildren): Model {

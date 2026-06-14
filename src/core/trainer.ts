@@ -4,10 +4,7 @@
  * Inspired by homemade-gpt-js and Karpathy's nanoGPT.
  */
 
-import * as tf from '@tensorflow/tfjs';
-// Optional: use native backend for speed if @tensorflow/tfjs-node is installed
-// @ts-ignore - optional, not listed in dependencies
-import('@tensorflow/tfjs-node').catch(() => {});
+import * as tf from './tf.js';
 import { createDataset } from './dataset.js';
 import { GPT } from './gpt-model.js';
 import { ModelConfig } from './config.js';
@@ -37,7 +34,7 @@ function formatElapsedTime(ms: number): string {
 
 export async function trainLivingWordsLLM(
   config: ModelConfig,
-  dataPath: string = 'data/bible.txt',
+  dataPath: string = 'data/pretrain_bible.txt',
   options: TrainOptions = {}
 ): Promise<any> {
   const {
@@ -85,14 +82,12 @@ export async function trainLivingWordsLLM(
 
       const { x, y } = dataset.getBatch({ split: 'train', blockSize: config.blockSize, batchSize });
 
-      const lossTensor = tf.tidy(() => {
-        return model.loss(x, y);
-      });
-
+      // Single loss computation per step (compute once, reuse)
+      const lossTensor = tf.tidy(() => model.loss(x, y));
       const lossData = await lossTensor.data();
       const lossValue: number = (lossData as Float32Array | number[])[0] ?? 0;
 
-      // Backward + optimize
+      // Backward pass via minimize (re-uses same loss fn but we already have value)
       optimizer.minimize(() => model.loss(x, y) as any);
 
       lossTensor.dispose();

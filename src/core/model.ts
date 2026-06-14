@@ -1,7 +1,4 @@
-import * as tf from '@tensorflow/tfjs';
-// Optional: use native backend for speed if user has explicitly installed @tensorflow/tfjs-node
-// @ts-ignore - optional, not listed in dependencies
-import('@tensorflow/tfjs-node').catch(() => {});
+import * as tf from './tf.js';
 import { ModelConfig, configs } from './config.js';
 import { GPT } from './gpt-model.js';
 import { createDataset } from './dataset.js';
