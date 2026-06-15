@@ -25,27 +25,33 @@ function getBaseEncoding() {
  * from tiktoken on the provided corpus.
  */
 export function createSmallTiktokenTokenizer(
-  corpus: string,
-  targetVocabSize: number = 1536
+  corpus: string = '',
+  targetVocabSize: number = 1536,
+  fixedKeptOrigIds?: number[]
 ): Tokenizer {
   const enc = getBaseEncoding();
-  const tokenFreq: Map<number, number> = new Map();
-
-  // Tokenize the entire corpus and count frequencies
-  const tokens = Array.from(enc.encode(corpus));
-  for (const t of tokens) {
-    tokenFreq.set(t, (tokenFreq.get(t) || 0) + 1);
-  }
-
-  // Sort by frequency and keep the top N tokens
-  const sorted = Array.from(tokenFreq.entries())
-    .sort((a, b) => b[1] - a[1])
-    .slice(0, targetVocabSize - 4); // reserve space for special tokens
 
   const vocabMap = new Map<number, number>(); // original tiktoken id -> compact id
   let compactId = 4;
 
-  for (const [origId] of sorted) {
+  let kept: number[];
+  if (fixedKeptOrigIds && fixedKeptOrigIds.length > 0) {
+    kept = fixedKeptOrigIds.slice(0, targetVocabSize - 4);
+  } else if (corpus && corpus.length > 0) {
+    const tokenFreq: Map<number, number> = new Map();
+    const tokens = Array.from(enc.encode(corpus));
+    for (const t of tokens) {
+      tokenFreq.set(t, (tokenFreq.get(t) || 0) + 1);
+    }
+    const sorted = Array.from(tokenFreq.entries())
+      .sort((a, b) => b[1] - a[1])
+      .slice(0, targetVocabSize - 4);
+    kept = sorted.map(([id]) => id);
+  } else {
+    kept = [];
+  }
+
+  for (const origId of kept) {
     vocabMap.set(origId, compactId++);
   }
 
@@ -56,7 +62,7 @@ export function createSmallTiktokenTokenizer(
 
   const unkId = 1;
 
-  return {
+  const tok: any = {
     encode: (text: string): number[] => {
       const rawTokens: number[] = Array.from(enc.encode(text));
       return rawTokens.map(t => vocabMap.get(t) ?? unkId);
@@ -70,4 +76,10 @@ export function createSmallTiktokenTokenizer(
       return targetVocabSize;
     },
   };
+
+  if (!fixedKeptOrigIds && kept.length > 0) {
+    tok._subwordKeptIds = kept;
+  }
+
+  return tok as Tokenizer;
 }

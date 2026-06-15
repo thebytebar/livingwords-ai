@@ -15,6 +15,7 @@ export async function createDataset(args: DatasetParams): Promise<Dataset> {
   let tokenizer: Tokenizer;
   let vocabSizeActual: number;
 
+  let vocabulary: string[] = [];
   if (useSubword) {
     tokenizer = createSmallTiktokenTokenizer(textSource, targetVocab);
     vocabSizeActual = tokenizer.vocabSize;
@@ -37,6 +38,7 @@ export async function createDataset(args: DatasetParams): Promise<Dataset> {
       vocabSize: chars.length + indexShift,
     };
     vocabSizeActual = tokenizer.vocabSize;
+    vocabulary = chars;
   }
 
   const encoded = tokenizer.encode(textSource);
@@ -58,14 +60,19 @@ export async function createDataset(args: DatasetParams): Promise<Dataset> {
     return { x, y };
   });
 
-  return {
+  const ds: any = {
     vocabSize: vocabSizeActual,
     dataSize: textSize,
-    vocabulary: [],
+    vocabulary,
     text: textSource,
     getBatch,
     encode: tokenizer.encode.bind(tokenizer),
     decode: tokenizer.decode.bind(tokenizer),
     dispose: () => data.dispose(),
   };
+  if (useSubword) {
+    const kept = (tokenizer as any)._subwordKeptIds;
+    if (kept) ds._subwordKeptIds = kept;
+  }
+  return ds;
 }

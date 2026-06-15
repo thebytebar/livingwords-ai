@@ -1,6 +1,4 @@
 node_modules
-weights/
-data/*.large.txt
 .DS_Store
 dist/
 *.log

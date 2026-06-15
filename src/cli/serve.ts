@@ -124,10 +124,11 @@ export async function startServer(port: number = 3000, loadDir: string = 'weight
         });
         const data = await r.json();
         if (!r.ok) throw new Error(data?.error || 'Request failed');
-        // Show only the generated continuation for cleanliness
+        // Show only the generated continuation for cleanliness.
+        // For subword models, exact prefix match may fail (UNKs in detok), so fallback to full text.
         let out = data.text || '';
         if (out.startsWith(prompt)) out = out.slice(prompt.length);
-        out = out.replace(/^[\s,.;:'"!?]+/, '').trim() || '(no new tokens)';
+        out = out.replace(/^[\s,.;:'"!?]+/, '').trim() || data.text || '(no new tokens)';
         thinking.querySelector('.bubble').textContent = out;
       } catch (e) {
         thinking.querySelector('.bubble').textContent = 'Error: ' + (e?.message || e);

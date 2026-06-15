@@ -43,7 +43,10 @@ export async function startChat(loadDir: string = 'weights'): Promise<void> {
       // Clean leading punctuation/spaces for nicer display
       continuation = continuation.replace(/^[\s,.;:'"!?]+/, '').trim();
 
-      console.log('LivingWords:', continuation || '[...]');
+      // Fallback to full reply for subword tokenizers (where exact string prefix may not match due to UNKs)
+      // or when only new tokens after clean are empty.
+      const toShow = continuation || reply || '[...]';
+      console.log('LivingWords:', toShow);
       console.log('');
     }
   } finally {

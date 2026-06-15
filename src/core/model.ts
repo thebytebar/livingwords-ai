@@ -2,6 +2,7 @@ import * as tf from './tf.js';
 import { ModelConfig, configs } from './config.js';
 import { GPT } from './gpt-model.js';
 import { createDataset } from './dataset.js';
+import { createSmallTiktokenTokenizer } from './tokenizer.js';
 import type { TrainOptions } from './trainer.js';
 
 interface Tokenizer {
@@ -16,6 +17,7 @@ export class LivingWordsLLM {
   private tokenizer: Tokenizer | null = null;
   private vocabulary: string[] = [];
   private effectiveVocabSize: number = 0;
+  private subwordKeptIds: number[] | null = null;
 
   constructor(config: ModelConfig = configs.theoSmall) {
     this.config = { ...config };
@@ -46,6 +48,7 @@ export class LivingWordsLLM {
       encode: ds.encode.bind(ds),
       decode: ds.decode.bind(ds),
     };
+    this.subwordKeptIds = (ds as any)._subwordKeptIds || null;
     this.effectiveVocabSize = ds.vocabSize;
     this.config = { ...this.config, vocabSize: ds.vocabSize };
     ds.dispose();
@@ -97,6 +100,7 @@ export class LivingWordsLLM {
       nHead: this.config.nHead,
       nLayer: this.config.nLayer,
       useSubword: this.config.vocabSize > 256,
+      subwordKeptIds: this.subwordKeptIds || undefined,
       savedAt: new Date().toISOString(),
     }, { spaces: 2 });
     console.log(`💾 Saved weights + vocab to ${weightsDir}/`);
@@ -116,19 +120,53 @@ export class LivingWordsLLM {
     const weights = await fse.readJson(wFile);
 
     const vocab: string[] = meta.vocabulary || [];
-    const stoi: Record<string, number> = {};
-    const itos: Record<number, string> = {};
-    const indexShift = 1;
-    vocab.forEach((ch, i) => {
-      const id = i + indexShift;
-      stoi[ch] = id;
-      itos[id] = ch;
-    });
+    const useSubword = !!meta.useSubword;
+    const subwordKeptIds: number[] | undefined = Array.isArray(meta.subwordKeptIds) ? meta.subwordKeptIds : undefined;
+
+    if (useSubword) {
+      let swTok: any;
+      if (subwordKeptIds && subwordKeptIds.length > 0) {
+        swTok = createSmallTiktokenTokenizer('', meta.vocabSize || 1536, subwordKeptIds);
+      } else {
+        // Legacy weight files (pre-subwordKeptIds): re-derive tokenizer selection from corpus.
+        // This must match the exact corpus used at train time for correct id mapping.
+        let corpus = '';
+        const candidates = ['data/pretrain_bible.txt', 'data/bibles/kjv.txt', 'data/bibles/web.txt'];
+        for (const p of candidates) {
+          try {
+            const fsmod = await import('fs/promises');
+            corpus = await fsmod.readFile(p, 'utf8');
+            if (corpus.length > 2000) break;
+          } catch {}
+        }
+        if (!corpus || corpus.length < 2000) {
+          corpus = await this.fetchText('data/pretrain_bible.txt');
+        }
+        swTok = createSmallTiktokenTokenizer(corpus, meta.vocabSize || 1536);
+      }
+      this.tokenizer = {
+        encode: swTok.encode.bind(swTok),
+        decode: swTok.decode.bind(swTok),
+      };
+      this.subwordKeptIds = (swTok as any)._subwordKeptIds || subwordKeptIds || null;
+    } else {
+      // Char-level (exact inverse for prompt prefix stripping in chat)
+      const stoi: Record<string, number> = {};
+      const itos: Record<number, string> = {};
+      const indexShift = 1;
+      vocab.forEach((ch, i) => {
+        const id = i + indexShift;
+        stoi[ch] = id;
+        itos[id] = ch;
+      });
+      this.tokenizer = {
+        encode: (s: string) => s.split('').map((c) => stoi[c] || 0),
+        decode: (a: number[]) => a.map((i) => itos[i] || '').join(''),
+      };
+      this.subwordKeptIds = null;
+    }
+
     this.vocabulary = vocab;
-    this.tokenizer = {
-      encode: (s: string) => s.split('').map((c) => stoi[c] || 0),
-      decode: (a: number[]) => a.map((i) => itos[i] || '').join(''),
-    };
     this.effectiveVocabSize = meta.vocabSize || vocab.length;
 
     this.config = {
@@ -165,6 +203,7 @@ export class LivingWordsLLM {
     });
     this.vocabulary = [...ds.vocabulary];
     this.tokenizer = { encode: ds.encode.bind(ds), decode: ds.decode.bind(ds) };
+    this.subwordKeptIds = (ds as any)._subwordKeptIds || null;
     this.effectiveVocabSize = ds.vocabSize;
     this.config = { ...this.config, vocabSize: ds.vocabSize };
 
