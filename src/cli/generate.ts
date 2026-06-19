@@ -10,7 +10,7 @@ program
   .argument('<prompt>', 'The prompt to generate from')
   .option('-m, --max-tokens <number>', 'Maximum tokens to generate', '100')
   .action(async (prompt, options) => {
-    const model = new LivingWordsLLM(configs.pico);
+    const model = new LivingWordsLLM(configs.theoSmall);
     await model.load(undefined, { silent: true });
     const result = await model.generate(prompt, parseInt(options.maxTokens));
     console.log('\n' + result);

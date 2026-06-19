@@ -1,0 +1,20 @@
+# Training dependencies for LivingWords LLM (PyTorch)
+# Install with: pip install -r requirements.txt
+# For CPU-only laptop training (recommended default):
+#   pip install torch --index-url https://download.pytorch.org/whl/cpu
+# On Apple Silicon (M1/M2/M3): plain "pip install torch" gives MPS acceleration automatically.
+# For CUDA GPU: follow https://pytorch.org/get-started/locally/
+
+torch>=2.3
+tiktoken>=0.7
+numpy>=1.26
+safetensors>=0.4  # preferred for modern weight export (optional but recommended)
+
+# For ONNX export (recommended for the new inference path):
+onnx>=1.16
+
+# onnxruntime is only needed at *runtime* in Node.js (see package.json),
+# not for Python training/export.
+
+# Dev / notebook helpers (optional)
+# tqdm  # already provided by rich progress or use built-in

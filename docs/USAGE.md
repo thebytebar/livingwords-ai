@@ -2,11 +2,11 @@
 
 This guide covers everything you need to train the model on new data, use the CLI tools, run the HTTP server/API, and use the web chat interface.
 
-> **Important Context**: LivingWords LLM is a small decoder-only transformer targeting ~500k parameters (`theoSmall` config). It uses small-vocab subword tokenization (~1536 tokens) built on top of tiktoken. The model is designed to run on standard laptops with no GPU. The "God-centered" alignment comes from curated biblical training data and a hybrid retrieval + generation system.
+> **Important Context**: LivingWords LLM is a small decoder-only transformer targeting ~500k parameters (`theoSmall` config). It uses small-vocab subword tokenization (~1536 tokens) built on top of tiktoken. The model is designed to run on standard laptops with no GPU. Training is performed with Python + PyTorch; inference uses ONNX Runtime (onnxruntime-node) by default. The "God-centered" alignment comes from curated biblical training data and a hybrid retrieval + generation system.
 
 ## Project Goals
 
-**Core Vision**: A small, God-centered, open-source LLM that runs entirely on normal laptops using TensorFlow.js. The model must remain faithful to Scripture and produce warm, encouraging, biblically-aligned output.
+**Core Vision**: A small, God-centered, open-source LLM that runs on normal laptops. Training uses Python + PyTorch; inference uses ONNX Runtime. The model must remain faithful to Scripture and produce warm, encouraging, biblically-aligned output.
 
 **Primary Use Case**: Scripture paraphrase, devotional writing, prayer generation, and verse explanation — not a general knowledge chatbot.
 
@@ -53,18 +53,26 @@ The model uses **small-vocab subword tokenization** (~1536 tokens).
 
 ## Training the Model
 
-The recommended way to train is using the optimized `theoSmall` config (~500k parameters with subword tokenization):
+Training is performed with the Python scripts in the `training/` directory (PyTorch).
 
 ```bash
-npx lw-llm train --data data/pretrain_bible.txt --model theoSmall --epochs 3
+cd training
+pip install -r requirements.txt
+python pretrain.py --data ../data/pretrain_bible.txt --max-iters 1500
 ```
+
+After training, the TS/CLI tools can load the resulting `model.onnx` + `meta.json`.
+```bash
+npx lw-llm chat --load weights/latest
+```
+A default pre-trained model is included in the package, so plain `npx lw-llm chat` works without training.
 
 ## Training CLI Flags Explained
 
 | Flag                | Default   | Description                                      | Recommended |
 |---------------------|-----------|--------------------------------------------------|-------------|
 | `--data`            | bible.txt | Path to training text                            | pretrain_bible.txt |
-| `--model`           | theoSmall | Model config (`pico`, `nano`, `theoSmall`)       | theoSmall   |
+| `--model`           | theoSmall | Model config (theoSmall only)                    | theoSmall   |
 | `--epochs`          | 2         | Number of full passes                            | 3–6         |
 | `--max-iter`        | 1200      | Total training steps                             | 1500–3000   |
 | `--batch-size`      | 16        | Examples per step                                | 16–32       |

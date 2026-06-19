@@ -1,12 +1,14 @@
 /**
- * Post-training data loaders for SFT and DPO.
- * Minimal extensions for the LivingWords tiny model.
+ * @deprecated Post-training data is now handled in Python.
+ * See training/common/dataset.py and the sft/dpo scripts.
+ *
+ * Legacy stubs only.
  */
 
-import * as fs from 'fs/promises';
-
 export interface SFTExample {
-  text: string; // formatted as "Q: ... A: ..." or raw completion text
+  text?: string;
+  prompt?: string;
+  completion?: string;
 }
 
 export interface PreferenceExample {
@@ -15,16 +17,12 @@ export interface PreferenceExample {
   rejected: string;
 }
 
-export async function loadSFTData(path: string): Promise<SFTExample[]> {
-  const content = await fs.readFile(path, 'utf8');
-  if (path.endsWith('.jsonl')) {
-    return content.trim().split('\n').map(line => JSON.parse(line));
-  }
-  // Fallback: treat whole file as one example
-  return [{ text: content }];
+/** @deprecated */
+export async function loadSFTData(_path: string): Promise<SFTExample[]> {
+  throw new Error('loadSFTData (JS) removed. Use Python training scripts.');
 }
 
-export async function loadPreferenceData(path: string): Promise<PreferenceExample[]> {
-  const content = await fs.readFile(path, 'utf8');
-  return content.trim().split('\n').map(line => JSON.parse(line));
+/** @deprecated */
+export async function loadPreferenceData(_path: string): Promise<PreferenceExample[]> {
+  throw new Error('loadPreferenceData (JS) removed. Use Python training scripts.');
 }

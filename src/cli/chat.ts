@@ -10,7 +10,7 @@ import * as readline from 'readline/promises';
 import { stdin as input, stdout as output } from 'process';
 
 export async function startChat(loadDir: string = 'weights'): Promise<void> {
-  const model = new LivingWordsLLM(configs.pico);
+  const model = new LivingWordsLLM(configs.theoSmall);
   await model.load(loadDir);
 
   console.log('\n🙏  LivingWords LLM — Interactive Chatbot');

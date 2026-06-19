@@ -2,7 +2,7 @@
 
 This document explains the fundamental ideas behind how this LLM works. It is written for developers who want to understand the "why" and "how" of building a small language model from scratch.
 
-LivingWords LLM is a **small decoder-only transformer** (~500k parameters in the `theoSmall` config) implemented in TypeScript using TensorFlow.js. It is designed to run on normal laptops with no GPU and stay faithful to Scripture. The model uses **small-vocab subword tokenization** (~2048 tokens) for better coherence while remaining lightweight.
+LivingWords LLM is a **small decoder-only transformer** (~990k parameters in the `theoSmall` config). Training is performed in Python with PyTorch. Inference is implemented in TypeScript using ONNX Runtime (with `onnxruntime-node`). It is designed to run on normal laptops with no GPU and stay faithful to Scripture. The model uses **small-vocab subword tokenization** (~1536 tokens) for better coherence while remaining lightweight.
 
 ---
 
@@ -53,7 +53,7 @@ Computers don't understand letters. They need numbers.
 
 ### Small-Vocab Subword Tokenization (v1)
 
-LivingWords LLM v1 uses a **compact subword vocabulary** of approximately 2048 tokens. It leverages tiktoken (`cl100k_base`) to generate high-quality subword splits, then keeps only the most frequent tokens from the training corpus.
+LivingWords LLM uses a **compact subword vocabulary** of approximately 1536 tokens. It leverages tiktoken (`cl100k_base`) to generate high-quality subword splits, then keeps only the most frequent tokens from the training corpus.
 
 This approach gives better coherence than pure character-level tokenization while keeping the vocabulary small enough to stay within the ~500k parameter budget.
 
@@ -72,13 +72,13 @@ This approach gives better coherence than pure character-level tokenization whil
 
 ## Why So Small? (theoSmall config)
 
-The `theoSmall` configuration targets approximately **500,000 parameters**:
+The `theoSmall` configuration targets approximately **990,000 parameters** (actual count from implementation):
 
-- `nEmbd`: 128
-- `nHead`: 8
+- `nEmbd`: 96
+- `nHead`: 6
 - `nLayer`: 6
 - `blockSize`: 256
-- `vocabSize`: ~2048 (small custom subword vocab built on top of tiktoken)
+- `vocabSize`: 1536 (small custom subword vocab built on top of tiktoken)
 
 This size was chosen so that:
 - Training completes in reasonable time on a laptop

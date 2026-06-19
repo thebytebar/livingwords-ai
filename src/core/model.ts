@@ -1,9 +1,17 @@
-import * as tf from './tf.js';
 import { ModelConfig, configs } from './config.js';
-import { GPT } from './gpt-model.js';
-import { createDataset } from './dataset.js';
 import { createSmallTiktokenTokenizer } from './tokenizer.js';
-import type { TrainOptions } from './trainer.js';
+
+import { InferenceBackend, runGenerationLoop, GenerateOptions } from './inference/backend.js';
+
+// Lazy for ONNX (onnxruntime-node is optional dep)
+let createOnnxBackend: any = null;
+async function getCreateOnnxBackend() {
+  if (!createOnnxBackend) {
+    const mod = await import('./inference/onnx-backend.js');
+    createOnnxBackend = mod.createOnnxBackend;
+  }
+  return createOnnxBackend;
+}
 
 interface Tokenizer {
   encode: (s: string) => number[];
@@ -12,7 +20,7 @@ interface Tokenizer {
 
 export class LivingWordsLLM {
   private config: ModelConfig;
-  private gpt: any = null;
+  private backend: InferenceBackend | null = null;  // ONNX backend (the only supported path)
   private isBuilt: boolean = false;
   private tokenizer: Tokenizer | null = null;
   private vocabulary: string[] = [];
@@ -37,21 +45,40 @@ export class LivingWordsLLM {
   private async initTokenizer(dataPath: string = 'data/bible.txt'): Promise<void> {
     const text = await this.fetchText(dataPath);
     const useSubword = this.config.vocabSize > 256;
-    const ds = await createDataset({
-      textSource: text,
-      maskZero: true,
-      useSubword,
-      vocabSize: this.config.vocabSize,
+
+    // In the ONNX-only world we prefer loading from meta.json (which carries subwordKeptIds).
+    // This path is for fresh "unloaded" use (rare). We support subword via tiktoken only (no TF dataset needed).
+    if (useSubword) {
+      const swTok = createSmallTiktokenTokenizer(text, this.config.vocabSize);
+      this.tokenizer = {
+        encode: swTok.encode.bind(swTok),
+        decode: swTok.decode.bind(swTok),
+      };
+      this.subwordKeptIds = (swTok as any)._subwordKeptIds || null;
+      this.effectiveVocabSize = swTok.vocabSize;
+      this.vocabulary = [];
+      this.config = { ...this.config, vocabSize: this.effectiveVocabSize };
+      return;
+    }
+
+    // Legacy char-level (kept for completeness, no TF tensor creation here)
+    const chars = Array.from(new Set(text)).sort();
+    const indexShift = 1;
+    const stoi: Record<string, number> = {};
+    const itos: Record<number, string> = {};
+    chars.forEach((ch, i) => {
+      const id = i + indexShift;
+      stoi[ch] = id;
+      itos[id] = ch;
     });
-    this.vocabulary = [...ds.vocabulary];
     this.tokenizer = {
-      encode: ds.encode.bind(ds),
-      decode: ds.decode.bind(ds),
+      encode: (s: string) => s.split('').map((c) => stoi[c] || 0),
+      decode: (a: number[]) => a.map((i) => itos[i] || '').join(''),
     };
-    this.subwordKeptIds = (ds as any)._subwordKeptIds || null;
-    this.effectiveVocabSize = ds.vocabSize;
-    this.config = { ...this.config, vocabSize: ds.vocabSize };
-    ds.dispose();
+    this.vocabulary = chars;
+    this.subwordKeptIds = null;
+    this.effectiveVocabSize = chars.length + indexShift;
+    this.config = { ...this.config, vocabSize: this.effectiveVocabSize };
   }
 
   private async build(force: boolean = false): Promise<void> {
@@ -61,21 +88,11 @@ export class LivingWordsLLM {
       await this.initTokenizer();
     }
 
-    const vs = this.effectiveVocabSize || this.config.vocabSize;
-    this.gpt = GPT({
-      nLayer: this.config.nLayer,
-      nHead: this.config.nHead,
-      nEmbd: this.config.nEmbd,
-      vocabSize: vs,
-      blockSize: this.config.blockSize,
-      embdDropout: this.config.dropout,
-      residDropout: this.config.dropout,
-      attnDropout: this.config.dropout,
-    });
-    this.gpt.build?.();
+    // For the ONNX-only world, "build" just ensures tokenizer is ready.
+    // The actual model is loaded via .load() which sets up the OnnxBackend.
+    // Fresh generate() without prior .load() with a .onnx will fail gracefully below.
     this.isBuilt = true;
-    const pcount = this.gpt.summary ? this.gpt.summary().params : 'n/a';
-    console.log(`✅ Model built. Params: ${pcount}, vocabSize: ${vs}, blockSize: ${this.config.blockSize}`);
+    console.log(`✅ Model prepared (tokenizer ready). Use .load(dir-with-model.onnx) for inference.`);
   }
 
   private async getFsExtra(): Promise<any> {
@@ -83,15 +100,51 @@ export class LivingWordsLLM {
     return (mod as any).default || mod;
   }
 
-  async save(weightsDir: string = 'weights'): Promise<void> {
-    if (!this.gpt || typeof this.gpt.getWeights !== 'function') {
-      console.log('No model weights to save yet.');
-      return;
+  private async resolveBundledWeightsDir(): Promise<string | null> {
+    try {
+      const { fileURLToPath } = await import('url');
+      const { dirname, resolve, join } = await import('path');
+      const currentFile = fileURLToPath(import.meta.url);
+      let dir = dirname(currentFile);
+
+      // Ascend a few levels: dist/core -> dist -> packageRoot, or src/core -> src -> packageRoot
+      for (let i = 0; i < 6; i++) {
+        const candidate = join(dir, 'weights');
+        // If package.json identifies this as our package, use it
+        try {
+          const fsmod = await import('fs/promises');
+          const pkgPath = join(dir, 'package.json');
+          const pkgRaw = await fsmod.readFile(pkgPath, 'utf8');
+          const pkg = JSON.parse(pkgRaw);
+          if (pkg && pkg.name === 'livingwords-llm') {
+            return candidate;
+          }
+        } catch {}
+
+        // Or if the weights dir here actually contains the model file
+        try {
+          const fsmod = await import('fs/promises');
+          await fsmod.access(join(candidate, 'model.onnx'));
+          return candidate;
+        } catch {}
+
+        const parent = dirname(dir);
+        if (parent === dir) break;
+        dir = parent;
+      }
+    } catch {
+      // ignore resolution errors, fall through
     }
+    return null;
+  }
+
+  async save(weightsDir: string = 'weights'): Promise<void> {
+    // In the modern ONNX world, models are exported from the Python training scripts.
+    // This method is deprecated and kept only for API compatibility.
+    console.warn('⚠️  .save() is deprecated. Models are now trained and exported from the Python training/ directory (which produces model.onnx + meta.json).');
+    // Optionally still write meta for legacy tools, but no weights.
     const fse = await this.getFsExtra();
     await fse.ensureDir(weightsDir);
-    const weights = await this.gpt.getWeights();
-    await fse.writeJson(`${weightsDir}/weights.json`, weights, { spaces: 0 });
     await fse.writeJson(`${weightsDir}/meta.json`, {
       vocabulary: this.vocabulary,
       vocabSize: this.effectiveVocabSize,
@@ -99,25 +152,52 @@ export class LivingWordsLLM {
       nEmbd: this.config.nEmbd,
       nHead: this.config.nHead,
       nLayer: this.config.nLayer,
-      useSubword: this.config.vocabSize > 256,
+      useSubword: true,
       subwordKeptIds: this.subwordKeptIds || undefined,
       savedAt: new Date().toISOString(),
+      note: 'ONNX models are exported from Python training. This meta is for reference only.'
     }, { spaces: 2 });
-    console.log(`💾 Saved weights + vocab to ${weightsDir}/`);
+    console.log(`ℹ️  Wrote meta.json to ${weightsDir}/ (no weights.json - use Python export for full model).`);
   }
 
   async load(weightsDir: string = 'weights', opts: { silent?: boolean } = {}): Promise<boolean> {
     const fse = await this.getFsExtra();
-    const wFile = `${weightsDir}/weights.json`;
-    const mFile = `${weightsDir}/meta.json`;
-    if (!(await fse.pathExists(wFile)) || !(await fse.pathExists(mFile))) {
+    let targetDir = weightsDir;
+    let mFile = `${targetDir}/meta.json`;
+    let onnxFile = `${targetDir}/model.onnx`;
+
+    let hasMeta = await fse.pathExists(mFile);
+    let hasOnnx = await fse.pathExists(onnxFile);
+
+    // Fallback: if the requested dir (commonly 'weights' from cwd) has no model,
+    // try the one bundled inside the installed npm package. This makes
+    // `npx lw-llm chat` etc work out of the box.
+    if (!hasMeta || !hasOnnx) {
+      const bundled = await this.resolveBundledWeightsDir();
+      if (bundled && bundled !== targetDir) {
+        const m2 = `${bundled}/meta.json`;
+        const o2 = `${bundled}/model.onnx`;
+        const hasMeta2 = await fse.pathExists(m2);
+        const hasOnnx2 = await fse.pathExists(o2);
+        if (hasMeta2 && hasOnnx2) {
+          targetDir = bundled;
+          mFile = m2;
+          onnxFile = o2;
+          hasMeta = true;
+          hasOnnx = true;
+        }
+      }
+    }
+
+    if (!hasMeta || !hasOnnx) {
       if (!opts.silent) {
-        console.log('ℹ️  No saved weights found at', weightsDir, '(will initialize from data on first use)');
+        console.log('ℹ️  No model.onnx + meta.json found at', weightsDir, '(expected after Python training).');
+        console.log('    Run training (see training/README.md) or use --load <dir-with-model.onnx+meta.json>');
       }
       return false;
     }
+
     const meta = await fse.readJson(mFile);
-    const weights = await fse.readJson(wFile);
 
     const vocab: string[] = meta.vocabulary || [];
     const useSubword = !!meta.useSubword;
@@ -128,8 +208,7 @@ export class LivingWordsLLM {
       if (subwordKeptIds && subwordKeptIds.length > 0) {
         swTok = createSmallTiktokenTokenizer('', meta.vocabSize || 1536, subwordKeptIds);
       } else {
-        // Legacy weight files (pre-subwordKeptIds): re-derive tokenizer selection from corpus.
-        // This must match the exact corpus used at train time for correct id mapping.
+        // Re-derive if no kept ids (rare for new exports)
         let corpus = '';
         const candidates = ['data/pretrain_bible.txt', 'data/bibles/kjv.txt', 'data/bibles/web.txt'];
         for (const p of candidates) {
@@ -150,7 +229,7 @@ export class LivingWordsLLM {
       };
       this.subwordKeptIds = (swTok as any)._subwordKeptIds || subwordKeptIds || null;
     } else {
-      // Char-level (exact inverse for prompt prefix stripping in chat)
+      // Char-level fallback (rare)
       const stoi: Record<string, number> = {};
       const itos: Record<number, string> = {};
       const indexShift = 1;
@@ -178,90 +257,48 @@ export class LivingWordsLLM {
       nLayer: meta.nLayer || this.config.nLayer,
     };
 
-    await this.build(true);
-    if (this.gpt && typeof this.gpt.setWeights === 'function') {
-      this.gpt.setWeights(weights);
-    }
-    console.log('✅ Loaded model weights and tokenizer from disk.');
+    // ONNX is now the only supported inference path
+    this.backend?.dispose();
+    const createOnnx = await getCreateOnnxBackend();
+    this.backend = await createOnnx(onnxFile, this.config.blockSize, this.effectiveVocabSize);
+    this.isBuilt = true;
+
+    console.log('✅ Loaded model (ONNX backend) + tokenizer from disk.');
     return true;
   }
 
-  async train(dataPath: string, epochsOrOptions: number | TrainOptions = 1): Promise<void> {
-    const options: TrainOptions = typeof epochsOrOptions === 'number'
-      ? { epochs: epochsOrOptions }
-      : { ...epochsOrOptions };
-
-    const epochs = options.epochs ?? 1;
-
-    const text = await this.fetchText(dataPath);
-    const useSubword = this.config.vocabSize > 256;
-    const ds = await createDataset({
-      textSource: text,
-      maskZero: true,
-      useSubword,
-      vocabSize: this.config.vocabSize,
-    });
-    this.vocabulary = [...ds.vocabulary];
-    this.tokenizer = { encode: ds.encode.bind(ds), decode: ds.decode.bind(ds) };
-    this.subwordKeptIds = (ds as any)._subwordKeptIds || null;
-    this.effectiveVocabSize = ds.vocabSize;
-    this.config = { ...this.config, vocabSize: ds.vocabSize };
-
-    console.log(`🙏 Training LivingWordsLLM on ${dataPath} for ${epochs} epochs...`);
-
-    const { trainLivingWordsLLM } = await import('./trainer.js');
-
-    const saveCheckpoint = async (ckptModel: any, step: number) => {
-      this.gpt = ckptModel;
-      const padded = String(step).padStart(5, '0');
-      const ckptDir = `weights/checkpoint-${padded}`;
-      await this.save(ckptDir);
-      await this.save('weights/latest');
-    };
-
-    const trainedModel = await trainLivingWordsLLM(this.config, dataPath, {
-      epochs,
-      maxIter: options.maxIter ?? 800,
-      batchSize: options.batchSize,
-      learningRate: options.learningRate,
-      evalInterval: options.evalInterval,
-      saveInterval: options.saveInterval ?? 500,
-      saveCheckpoint,
-    });
-
-    this.gpt = trainedModel;
-    this.isBuilt = true;
-    ds.dispose();
-
-    console.log('📖 Training aligned with biblical doctrine. Ready for faithful generation.');
-    await this.save();
-    await this.save('weights/latest');
+  async train(dataPath: string, _epochsOrOptions: any = 1): Promise<void> {
+    // Training has been fully moved to Python + PyTorch (see training/ directory).
+    // This method is kept only for API compatibility and now always throws.
+    throw new Error(
+      'Training has moved to Python/PyTorch.\n\n' +
+      'Use the scripts in the training/ directory:\n' +
+      '  cd training\n' +
+      '  pip install -r requirements.txt\n' +
+      '  python pretrain.py --data ../data/pretrain_bible.txt --max-iters 1500\n\n' +
+      'SFT and DPO are also available (python sft.py / dpo.py).\n' +
+      'See training/README.md for details. The resulting weights/ are compatible with this class.'
+    );
   }
 
   async generate(prompt: string, maxTokens: number = 100): Promise<string> {
-    await this.build();
-    if (!this.gpt || !this.tokenizer) {
-      return prompt + '\n\n[Model not ready for generation]';
+    if (!this.backend) {
+      if (!this.tokenizer) {
+        await this.build();
+      }
+      return prompt + '\n\n[No model loaded. Use --load <dir> or ensure model.onnx + meta.json are present (bundled default or after training).]';
     }
-    console.log(`🤖 Generating God-centered continuation for: "${prompt}"`);
 
+    console.log(`🤖 Generating God-centered continuation for: "${prompt}" (via ${this.backend.constructor.name})`);
     try {
-      const seedTokens = this.tokenizer.encode(prompt);
-      const bs = this.config.blockSize;
-      const ctx = seedTokens.slice(-bs);
-      const idx = tf.tensor([ctx], [1, ctx.length], 'int32');
-
-      const outIdx = await this.gpt.generate({
-        idx,
+      const seedTokens = this.tokenizer!.encode(prompt);
+      const genOpts: GenerateOptions = {
         maxNewTokens: maxTokens,
         temperature: 0.75,
         doSample: true,
-      });
-
-      const arr = (await (outIdx as any).array()) as number[][];
-      const generated = this.tokenizer.decode(arr[0] || []);
-      tf.dispose([idx, outIdx]);
-      return generated;
+      };
+      const outTokens = await runGenerationLoop(this.backend, seedTokens, genOpts);
+      return this.tokenizer!.decode(outTokens);
     } catch (err) {
       console.error('Generation error:', err);
       return prompt + ' [...]';

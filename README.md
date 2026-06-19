@@ -2,27 +2,27 @@
 
 **Open-source God-centered LLM** aligned with Christian theological doctrine.
 
-A lightweight decoder-only transformer designed to run entirely on normal laptops (no GPU required) using pure JavaScript and TensorFlow.js. The model is built to stay faithful to Scripture and produce warm, encouraging, biblically-aligned output for Christians and ministries.
+A lightweight decoder-only transformer (theoSmall config) designed to run on normal laptops. Training is performed with Python + PyTorch. Inference uses TypeScript with ONNX Runtime (onnxruntime-node, optional dep) as the only supported engine. The model is built to stay faithful to Scripture and produce warm, encouraging, biblically-aligned output for Christians and ministries.
 
 ## Core Vision
 
 Create a small, God-centered, open-source LLM that:
 - Runs comfortably on a standard laptop (e.g. MacBook Air M1/M2 with 8GB RAM)
-- Uses only TensorFlow.js / JavaScript (CPU-only, no Python)
+- Training uses Python + PyTorch; runtime is TypeScript with ONNX Runtime (onnxruntime-node, optional)
 - Remains lightweight and educational
 - Produces scripture-flavored explanations, devotional thoughts, and prayer language
 
 ## Key Constraints (Non-Negotiable)
 
 - Runs on standard consumer laptops (CPU-only)
-- Pure JavaScript / TensorFlow.js stack
+- Training: Python + PyTorch; Inference: TypeScript + ONNX Runtime
 - Model must stay lightweight (~500k parameters target)
 - Training and inference must be feasible on modest hardware
 
 ## Target Architecture (v1)
 
 - Decoder-only transformer (nanoGPT-style)
-- ~500k parameters (`theoSmall` config)
+- ~990k parameters (`theoSmall` config) (actual count from the implementation)
 - Small-vocab subword tokenization (~1536 tokens) using tiktoken with frequency pruning
 - Context length: 256 tokens
 
@@ -68,7 +68,7 @@ The system is designed as a gated, reliable assistant:
 - CLI chatbot (`lw-llm chat`)
 - Server/API mode (`lw-llm serve`) — REST API + served web chat UI
 - Full training pipeline with checkpoints and automatic save/load
-- `theoSmall` config targeting ~500k parameters with subword tokenization
+- `theoSmall` config targeting ~990k parameters with subword tokenization
 
 ## Quick Start
 
@@ -76,13 +76,10 @@ The system is designed as a gated, reliable assistant:
 npm install livingwords-llm
 ```
 
-### CLI Usage
+### CLI Usage (runtime)
 
 ```bash
-# Train using the optimized theoSmall config
-npx lw-llm train --data data/pretrain_bible.txt --model theoSmall --epochs 3
-
-# Generate text
+# Generate text (uses the bundled default model, or --load for custom)
 npx lw-llm generate "In the beginning God created"
 
 # Interactive chatbot
@@ -91,6 +88,27 @@ npx lw-llm chat
 # Start server + web chat UI
 npx lw-llm serve --port 3000
 ```
+
+### Training (PyTorch)
+
+Training (pretrain + SFT + DPO) has moved to Python/PyTorch. `theoSmall` is the only supported configuration.
+
+```bash
+cd training
+pip install -r requirements.txt
+python pretrain.py --data ../data/pretrain_bible.txt --max-iters 1500
+# or
+python sft.py --data data/sft_sample.jsonl
+python dpo.py --data data/prefs_sample.jsonl
+```
+
+Weights are automatically exported in the format expected by the TypeScript runtime (both legacy `weights.json` and modern `model.onnx`), so `lw-llm chat` etc. continue to work unchanged.
+
+The runtime uses the ONNX backend (via `onnxruntime-node`, optional dep) when a `model.onnx` + `meta.json` is present (loaded via `.load()`). This is the currently supported inference path.
+
+TensorFlow.js is no longer supported. Old `weights.json` checkpoints are not loadable. Use the Python training tools in `training/` to produce `model.onnx` artifacts.
+
+See [training/README.md](training/README.md) for full details.
 
 ## Documentation
 

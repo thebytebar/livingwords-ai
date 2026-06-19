@@ -17,7 +17,7 @@ export async function startServer(port: number = 3000, loadDir: string = 'weight
   const app = express();
   app.use(express.json({ limit: '1mb' }));
 
-  const model = new LivingWordsLLM(configs.pico);
+  const model = new LivingWordsLLM(configs.theoSmall);
   await model.load(loadDir);
 
   // API for generation (used by web UI and external clients)

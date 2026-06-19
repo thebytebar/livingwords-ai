@@ -1,35 +1,35 @@
 #!/usr/bin/env node
 
 import { program } from 'commander';
-import { LivingWordsLLM } from '../core/model.js';
-import { configs } from '../core/config.js';
 
 program
   .name('lw-llm train')
-  .description('Train LivingWords LLM on a dataset')
-  .option('-d, --data <path>', 'Path to training data', 'data/pretrain_bible.txt')
-  .option('-m, --model <name>', 'Model config (pico | nano | theoSmall)', 'theoSmall')
-  .option('-e, --epochs <number>', 'Number of epochs', '3')
-  .option('--max-iter <number>', 'Total training steps', '1500')
-  .option('--batch-size <number>', 'Batch size', '16')
-  .option('--lr, --learning-rate <number>', 'Learning rate', '0.0008')
-  .option('--eval-interval <number>', 'Eval interval', '100')
-  .option('--save-interval <number>', 'Save interval', '400')
-  .action(async (options) => {
-    const modelConfig = (configs as any)[options.model] || configs.theoSmall;
-    const model = new LivingWordsLLM(modelConfig);
+  .description('Train LivingWords LLM (now powered by PyTorch)')
+  .action(() => {
+    console.log(`
+🙏  Training has moved to Python + PyTorch.
 
-    const trainOpts = {
-      epochs: parseInt(options.epochs, 10),
-      maxIter: parseInt(options.maxIter, 10),
-      batchSize: parseInt(options.batchSize, 10),
-      learningRate: parseFloat(options.learningRate),
-      evalInterval: parseInt(options.evalInterval, 10),
-      saveInterval: parseInt(options.saveInterval, 10),
-    };
+The old TensorFlow.js trainer has been removed.
 
-    await model.train(options.data, trainOpts);
-    console.log('✅ Training session complete.');
+To train (theoSmall is the only supported configuration):
+
+  cd training
+  pip install -r requirements.txt
+  python pretrain.py --data ../data/pretrain_bible.txt --max-iters 1500
+
+  # or for SFT / DPO
+  python sft.py --data data/sft_sample.jsonl
+  python dpo.py --data data/prefs_sample.jsonl
+
+After training, the weights are exported to ../weights/ (and checkpoints/)
+so the normal CLI still works:
+
+  npx lw-llm chat
+  npx lw-llm generate "In the beginning"
+
+See training/README.md for full instructions and flags.
+`);
+    process.exit(0);
   });
 
 program.parse();

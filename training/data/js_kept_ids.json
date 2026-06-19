@@ -1,12 +1,5 @@
 {
-  "vocabulary": [],
-  "vocabSize": 1536,
-  "blockSize": 256,
-  "nEmbd": 96,
-  "nHead": 6,
-  "nLayer": 6,
-  "useSubword": true,
-  "subwordKeptIds": [
+  "kept_orig_ids": [
     11,
     279,
     323,
@@ -1539,6 +1532,5 @@
     4237,
     16044,
     62496
-  ],
-  "savedAt": "2026-06-19T04:04:43.796943Z"
+  ]
 }

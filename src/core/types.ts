@@ -1,42 +1,12 @@
-import * as tf from './tf.js';
+// TF.js imports removed - this file is now free of TensorFlow dependencies.
 
-export interface ModelParams {
-  nLayer: number;
-  nHead: number;
-  nEmbd: number;
-  vocabSize: number;
-  blockSize: number;
-  embdDropout?: number;
-  residDropout?: number;
-  attnDropout?: number;
-}
+// Legacy TF Model interface removed.
 
-// Runtime model shape returned by GPT()
-export interface Model {
-  params: ModelParams;
-  apply: (idx: tf.Tensor) => tf.Tensor;
-  loss: (idx: tf.Tensor, targets: tf.Tensor) => tf.Tensor;
-  generate: (params: any, onGenerateChar?: (token: number) => void) => Promise<tf.Tensor>;
-  optimizer: (params: { learningRate: number }) => any;
-  build: () => void;
-  summary: () => { params: number };
-  dispose?: () => void;
-  getWeights?: () => Promise<any>;
-  setWeights?: (weights: any) => void;
-  sequenceLogProb?: (tokens: number[]) => Promise<number>;
-}
+// Legacy Layer interface removed.
 
-export interface Layer {
-  apply: (x: tf.Tensor) => tf.Tensor;
-  countParams?: () => number;
-  dispose?: () => void;
-  getChildren?: () => LayerChildren;
-}
-
-export type LayerLike = tf.layers.Layer | Layer | null | undefined;
-export type LayerChildren = Array<LayerLike | LayerLike[]>;
-export type NumericWeights = any;
-export type Weights = Record<string, NumericWeights>;
+// Legacy TF types removed.
+// Legacy TF types removed.
+// Legacy TF types removed.
 
 // High-level config for LivingWordsLLM (user-facing, from config.ts)
 export interface ModelConfig {
@@ -66,20 +36,13 @@ export interface Dataset {
   dataSize: number;
   vocabulary: string[];
   text: string;
-  getBatch: (args: DatasetGetBatchParams) => { x: tf.Tensor; y: tf.Tensor };
+  getBatch?: (args: DatasetGetBatchParams) => { x: any; y: any };
   encode: (s: string) => number[];
   decode: (a: number[]) => string;
-  dispose: () => void;
+  dispose?: () => void;
 }
 
-export interface LivingWordsModel {
-  params: ModelConfig;
-  apply: (x: tf.Tensor) => tf.Tensor;
-  generate: (args: any, onGenerateChar?: (token: number) => void) => Promise<tf.Tensor>;
-  loss: (x: tf.Tensor, y: tf.Tensor) => tf.Tensor;
-  build: () => void;
-  summary: () => { params: number };
-}
+// Legacy LivingWordsModel interface (TF-based) removed. The main public class is LivingWordsLLM.
 
 export interface SFTExample {
   text: string;

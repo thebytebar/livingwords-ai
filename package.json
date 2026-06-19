@@ -1,29 +1,31 @@
 {
   "name": "livingwords-llm",
   "version": "0.1.0",
-  "description": "Open-source God-centered LLM aligned with Christian theological doctrine. Small ~500k parameter decoder-only transformer designed to run on standard laptops using TensorFlow.js (CPU-only). Includes CLI, server/API, web UI, and training pipeline. Primary strength: Scripture paraphrase, devotional writing, and verse explanation.",
+  "description": "Open-source God-centered LLM aligned with Christian theological doctrine. Small decoder-only transformer (theoSmall config) for Scripture paraphrase, devotional writing, and verse explanation. Training: Python + PyTorch. Inference: TypeScript with ONNX Runtime (onnxruntime-node, optional).",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
   "bin": {
     "lw-llm": "dist/cli/index.js"
   },
   "scripts": {
-    "build": "tsc",
+    "build": "rm -rf dist && tsc",
     "postbuild": "chmod +x dist/cli/index.js",
     "start": "node dist/cli/index.js",
-    "train": "tsx src/cli/train.ts",
     "generate": "tsx src/cli/generate.ts",
     "chat": "tsx src/cli/chat.ts",
     "serve": "tsx src/cli/serve.ts",
     "dev": "tsx src/index.ts",
     "test": "echo \"Error: no test specified\" && exit 1",
-    "prepare": "npm run build && chmod +x dist/cli/index.js"
+    "prepare": "npm run build && chmod +x dist/cli/index.js",
+    "clean:weights": "rm -rf weights/latest training/checkpoints || true",
+    "train:full": "npm run clean:weights && bash training/run_full_pipeline.sh"
   },
   "keywords": [
     "llm",
     "transformer",
     "gpt",
-    "tensorflowjs",
+    "pytorch",
+    "onnx",
     "bible",
     "christian",
     "faith-tech",
@@ -35,29 +37,29 @@
     "type": "git",
     "url": "https://github.com/thebytebar/livingwords-llm.git"
   },
-  "dependencies": {
-    "@tensorflow/tfjs": "^4.21.0",
-    "commander": "^12.1.0",
-    "express": "^5.2.1",
-    "fs-extra": "^11.2.0",
-    "tiktoken": "^1.0.13"
-  },
-  "optionalDependencies": {
-    "@tensorflow/tfjs-node": "^4.21.0"
-  },
   "engines": {
     "node": ">=18 <23"
   },
+  "files": [
+    "dist",
+    "weights"
+  ],
+  "type": "module",
   "devDependencies": {
     "@types/express": "^5.0.6",
     "@types/fs-extra": "^11.0.4",
-    "@types/node": "^22.0.0",
+    "@types/node": "^25.9.3",
     "ts-node": "^10.9.2",
     "tsx": "^4.22.4",
-    "typescript": "^5.5.4"
+    "typescript": "^6.0.3"
   },
-  "files": [
-    "dist"
-  ],
-  "type": "module"
+  "dependencies": {
+    "commander": "^15.0.0",
+    "express": "^5.2.1",
+    "fs-extra": "^11.3.5",
+    "tiktoken": "^1.0.22"
+  },
+  "optionalDependencies": {
+    "onnxruntime-node": "^1.20.1"
+  }
 }
