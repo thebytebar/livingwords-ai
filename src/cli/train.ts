@@ -3,7 +3,7 @@
 import { program } from 'commander';
 
 program
-  .name('lw-llm train')
+  .name('lw train')
   .description('Train LivingWords LLM (now powered by PyTorch)')
   .action(() => {
     console.log(`
@@ -24,8 +24,8 @@ To train (theoSmall is the only supported configuration):
 After training, the weights are exported to ../weights/ (and checkpoints/)
 so the normal CLI still works:
 
-  npx lw-llm chat
-  npx lw-llm generate "In the beginning"
+  npx lw chat
+  npx lw generate "In the beginning"
 
 See training/README.md for full instructions and flags.
 `);

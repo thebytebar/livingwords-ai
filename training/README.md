@@ -39,7 +39,7 @@ python pretrain.py \
 ## What You Get
 
 - `../weights/latest/` (and `checkpoint-XXXXX/`) with:
-  - `model.onnx` + `meta.json` + `config.json` — the primary artifacts for the TS runtime (`lw-llm chat`, `generate`, `serve`).
+  - `model.onnx` + `meta.json` + `config.json` — the primary artifacts for the TS runtime (`lw chat`, `generate`, `serve`).
   - `kept_ids.json`
   - `model.safetensors` (or .pt fallback)
 
@@ -50,9 +50,9 @@ The training scripts now primarily emit the modern ONNX artifacts by default. Th
 `LivingWordsLLM.load(weightsDir)` loads the ONNX model:
 
 ```bash
-npx lw-llm chat --load weights/latest
+npx lw chat --load weights/latest
 # or
-npx lw-llm serve
+npx lw serve
 ```
 
 `onnxruntime-node` is an **optionalDependency** (recommended for inference). 

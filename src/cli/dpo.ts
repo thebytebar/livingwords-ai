@@ -3,7 +3,7 @@
 import { program } from 'commander';
 
 program
-  .name('lw-llm dpo')
+  .name('lw dpo')
   .description('Direct Preference Optimization (now in PyTorch)')
   .action(() => {
     console.log(`

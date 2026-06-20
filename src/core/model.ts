@@ -171,7 +171,7 @@ export class LivingWordsLLM {
 
     // Fallback: if the requested dir (commonly 'weights' from cwd) has no model,
     // try the one bundled inside the installed npm package. This makes
-    // `npx lw-llm chat` etc work out of the box.
+    // `npx lw chat` etc work out of the box.
     if (!hasMeta || !hasOnnx) {
       const bundled = await this.resolveBundledWeightsDir();
       if (bundled && bundled !== targetDir) {
@@ -294,14 +294,40 @@ export class LivingWordsLLM {
       const seedTokens = this.tokenizer!.encode(prompt);
       const genOpts: GenerateOptions = {
         maxNewTokens: maxTokens,
-        temperature: 0.75,
+        temperature: 0.65,
         doSample: true,
+        topK: 40,
+        topP: 0.9,
+        repetitionPenalty: 1.12,
       };
       const outTokens = await runGenerationLoop(this.backend, seedTokens, genOpts);
-      return this.tokenizer!.decode(outTokens);
+      // Return ONLY the continuation (new tokens after the prompt seed).
+      let continuation = this.tokenizer!.decode(outTokens.slice(seedTokens.length));
+
+      // Post-process: the base pretrain model (Bible next-token) loves to start every
+      // continuation with a random "Psalm N:N" or "Matthew X:Y" header because that's
+      // what the training distribution looks like. For user questions we strip the
+      // leading ref so the answer doesn't begin "Psalm 35:17 How long...".
+      // Also strip bare "N:N" or "N;N" patterns that the model loves to emit.
+      continuation = continuation.replace(
+        /^\s*(?:Genesis|Exodus|Leviticus|Numbers|Deuteronomy|Joshua|Judges|Ruth|1?\s*Samuel|2?\s*Samuel|1?\s*Kings|2?\s*Kings|1?\s*Chronicles|2?\s*Chronicles|Ezra|Nehemiah|Esther|Job|Psalm|Psalms|Proverbs|Ecclesiastes|Song of Solomon|Isaiah|Jeremiah|Lamentations|Ezekiel|Daniel|Hosea|Joel|Amos|Obadiah|Jonah|Micah|Nahum|Habakkuk|Zephaniah|Haggai|Zechariah|Malachi|Matthew|Mark|Luke|John|Acts|Romans|1?\s*Corinthians|2?\s*Corinthians|Galatians|Ephesians|Philippians|Colossians|1?\s*Thessalonians|2?\s*Thessalonians|1?\s*Timothy|2?\s*Timothy|Titus|Philemon|Hebrews|James|1?\s*Peter|2?\s*Peter|1?\s*John|2?\s*John|3?\s*John|Jude|Revelation)?\s*\d{1,3}[:;.]?\s*\d{0,3}\s*/i,
+        ''
+      );
+      // Drop leading spaces/punct and also a few very common Bible-sentence starters that
+      // otherwise make answers begin "and the ...", "of the ...", "for he ...".
+      continuation = continuation.replace(/^[\s,.;:'"!?]+/, '');
+      continuation = continuation.replace(/^(?:and |of |for |the |that |which |unto |in the |with the |to the )+/i, '');
+      continuation = continuation.trim();
+
+      // Make it look a tiny bit more like a sentence start for user-facing output.
+      if (continuation && /^[a-z]/.test(continuation)) {
+        continuation = continuation[0].toUpperCase() + continuation.slice(1);
+      }
+
+      return continuation || '[...]';
     } catch (err) {
       console.error('Generation error:', err);
-      return prompt + ' [...]';
+      return '[...]';
     }
   }
 }

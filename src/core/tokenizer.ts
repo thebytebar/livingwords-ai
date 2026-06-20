@@ -51,13 +51,13 @@ export function createSmallTiktokenTokenizer(
     kept = [];
   }
 
+  // Direct array reverse lookup (compactId -> original tiktoken id).
+  // Far more reliable than a Map under ts-node / ESM caching.
+  const origByCompact: number[] = [];
   for (const origId of kept) {
-    vocabMap.set(origId, compactId++);
-  }
-
-  const reverseMap = new Map<number, number>(); // compact id -> original tiktoken id
-  for (const [orig, compact] of vocabMap.entries()) {
-    reverseMap.set(compact, orig);
+    vocabMap.set(origId, compactId);
+    origByCompact[compactId] = origId;
+    compactId++;
   }
 
   const unkId = 1;
@@ -68,9 +68,21 @@ export function createSmallTiktokenTokenizer(
       return rawTokens.map(t => vocabMap.get(t) ?? unkId);
     },
     decode: (ids: number[]): string => {
-      const originalIds = ids.map(id => reverseMap.get(id) ?? 0);
-      const bytes = enc.decode(new Uint32Array(originalIds));
-      return new TextDecoder().decode(bytes);
+      // Map compact ids back to cl100k orig ids. Use replacement char for any
+      // that would produce the "!" byte (reserved/UNK ids). This prevents the
+      // confusing "!!Psalm" style garbage even if bad ids slip through.
+      const pieces: string[] = [];
+      for (const id of ids) {
+        const orig = (id >= 4 && id < origByCompact.length) ? origByCompact[id] : 0;
+        if (!orig) {
+          pieces.push('\uFFFD'); // �
+          continue;
+        }
+        const bytes = enc.decode([orig] as any);
+        const s = (bytes instanceof Uint8Array) ? new TextDecoder().decode(bytes) : String(bytes);
+        pieces.push(s);
+      }
+      return pieces.join('');
     },
     get vocabSize() {
       return targetVocabSize;

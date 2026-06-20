@@ -5,7 +5,7 @@
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
   "bin": {
-    "lw-llm": "dist/cli/index.js"
+    "lw": "dist/cli/index.js"
   },
   "scripts": {
     "build": "rm -rf dist && tsc",
@@ -57,9 +57,7 @@
     "commander": "^15.0.0",
     "express": "^5.2.1",
     "fs-extra": "^11.3.5",
-    "tiktoken": "^1.0.22"
-  },
-  "optionalDependencies": {
+    "tiktoken": "^1.0.22",
     "onnxruntime-node": "^1.20.1"
   }
 }

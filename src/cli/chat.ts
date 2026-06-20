@@ -6,6 +6,7 @@
 
 import { LivingWordsLLM } from '../core/model.js';
 import { configs } from '../core/config.js';
+import { buildExplanationPrompt } from '../core/verse.js';
 import * as readline from 'readline/promises';
 import { stdin as input, stdout as output } from 'process';
 
@@ -34,18 +35,17 @@ export async function startChat(loadDir: string = 'weights'): Promise<void> {
         break;
       }
 
-      // Each turn uses the user message as the prompt for a faithful continuation.
-      const reply = await model.generate(userInput, 96);
-      let continuation = reply.startsWith(userInput)
-        ? reply.slice(userInput.length)
-        : reply;
+      // Build a smart prompt.
+      // - If the user mentions a specific verse (John 3:16, Psalm 23, etc.) we look up the
+      //   actual text from the Bible corpus and seed with "Verse text\n\nThis verse teaches that "
+      //   so the model produces an explanation instead of random continuation.
+      // - Otherwise fall back to the theological steering phrase.
+      const modelPrompt = await buildExplanationPrompt(userInput);
 
-      // Clean leading punctuation/spaces for nicer display
-      continuation = continuation.replace(/^[\s,.;:'"!?]+/, '').trim();
-
-      // Fallback to full reply for subword tokenizers (where exact string prefix may not match due to UNKs)
-      // or when only new tokens after clean are empty.
-      const toShow = continuation || reply || '[...]';
+      let continuation = (await model.generate(modelPrompt, 55)).replace(/^[\s,.;:'"!?]+/, '').trim();
+      // Extra safety strip for any remaining common starters.
+      continuation = continuation.replace(/^(?:and |of |for |the |that |which |unto )+/i, '').trim();
+      const toShow = continuation || '[...]';
       console.log('LivingWords:', toShow);
       console.log('');
     }

@@ -157,7 +157,7 @@ def main():
 
     print("✅ SFT complete (with loss masking on completions).")
     export_all(model, cfg, tok, legacy_dir=latest, write_legacy_weights=False)
-    print("Exported to weights/latest (usable with lw-llm chat)")
+    print("Exported to weights/latest (usable with lw chat)")
 
 
 if __name__ == "__main__":

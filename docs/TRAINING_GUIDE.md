@@ -2,7 +2,7 @@
 
 This guide provides a complete, reproducible step-by-step process for training the `theoSmall` model from scratch through pre-training on the Bible corpus, supervised fine-tuning (SFT), and Direct Preference Optimization (DPO). The goal is to produce a coherent, theologically aligned model that generates warm, scripture-flavored explanations, devotionals, and responses.
 
-All training uses the Python/PyTorch pipeline in `training/`. The resulting `model.onnx` + `meta.json` artifacts are compatible with the TypeScript runtime (`npx lw-llm chat`, `serve`, etc.).
+All training uses the Python/PyTorch pipeline in `training/`. The resulting `model.onnx` + `meta.json` artifacts are compatible with the TypeScript runtime (`npx lw chat`, `serve`, etc.).
 
 **Target model**: `theoSmall` only (~990k parameters, 6 layers, 96 embd, 6 heads, block_size=256, ~1536 token vocab via pruned tiktoken cl100k_base).
 
@@ -82,9 +82,9 @@ After this step you have a functional base model. Test it:
 
 ```bash
 cd ..
-npx lw-llm chat --load weights/latest
+npx lw chat --load weights/latest
 # or
-npx lw-llm generate "In the beginning God created"
+npx lw generate "In the beginning God created"
 ```
 
 ## Step 2: Supervised Fine-Tuning (SFT) — Align to Instruction Following & Theology
@@ -117,7 +117,7 @@ python sft.py \
 After SFT, test coherence:
 
 ```bash
-npx lw-llm chat --load weights/latest
+npx lw chat --load weights/latest
 # Try prompts like: "Explain the Trinity" or "What does it mean that God created the heavens and the earth?"
 ```
 
@@ -169,7 +169,7 @@ python dpo.py --data ../data/dpo_prefs.jsonl --load ../weights/latest --max-iter
 
 # 5. Verify
 cd ..
-npx lw-llm chat --load weights/latest
+npx lw chat --load weights/latest
 ```
 
 **Expected outcome**: A model that produces fluent, biblically grounded, pastorally sensitive responses with good coherence within the 256-token context.
@@ -182,7 +182,7 @@ npx lw-llm chat --load weights/latest
   - Pretrain: Higher iters + moderate LR.
   - SFT: Lower LR, loss-masking critical.
   - DPO: Small beta, very low LR, fewer iters.
-- **Evaluation loop**: After each stage, run `npx lw-llm chat` and manually score samples on coherence, theological accuracy, warmth, and scripture fidelity. Regenerate with different seeds/temperatures (runtime default ~0.7).
+- **Evaluation loop**: After each stage, run `npx lw chat` and manually score samples on coherence, theological accuracy, warmth, and scripture fidelity. Regenerate with different seeds/temperatures (runtime default ~0.7).
 - **Checkpointing**: Use intermediate checkpoints if a stage overfits (rare on tiny model + good data).
 - **Tokenizer & export**: Always let the scripts handle export. Never manually edit `kept_ids.json` unless regenerating the vocab.
 - **Hybrid guardrails** (future): Pair the model with verse retrieval for safety on factual claims.
@@ -194,9 +194,9 @@ npx lw-llm chat --load weights/latest
 The TS runtime automatically prefers `model.onnx` + `meta.json` when present:
 
 ```bash
-npx lw-llm chat --load weights/latest
-npx lw-llm generate "The Lord is my shepherd" --load weights/latest
-npx lw-llm serve --port 3000
+npx lw chat --load weights/latest
+npx lw generate "The Lord is my shepherd" --load weights/latest
+npx lw serve --port 3000
 ```
 
 See `docs/USAGE.md` and `training/README.md` for more runtime details.

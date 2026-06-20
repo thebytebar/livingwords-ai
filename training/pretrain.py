@@ -139,7 +139,7 @@ def main():
     export_all(model, cfg, tokenizer, legacy_dir=latest_dir, write_legacy_weights=False)
     export_all(model, cfg, tokenizer, legacy_dir=weights_dir, write_legacy_weights=False)
 
-    print("Done. You can now run: npx lw-llm chat   (or point --load at one of the checkpoint dirs)")
+    print("Done. You can now run: npx lw chat   (or point --load at one of the checkpoint dirs)")
 
 
 if __name__ == "__main__":

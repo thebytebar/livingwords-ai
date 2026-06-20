@@ -6,12 +6,13 @@
  *  - GET /  -> single-file web chat interface (vanilla HTML/JS)
  *
  * Usage:
- *   npx lw-llm serve --port 3000
+ *   npx lw serve --port 3000
  */
 
 import express from 'express';
 import { LivingWordsLLM } from '../core/model.js';
 import { configs } from '../core/config.js';
+import { buildExplanationPrompt } from '../core/verse.js';
 
 export async function startServer(port: number = 3000, loadDir: string = 'weights'): Promise<void> {
   const app = express();
@@ -23,11 +24,14 @@ export async function startServer(port: number = 3000, loadDir: string = 'weight
   // API for generation (used by web UI and external clients)
   app.post('/api/generate', async (req, res) => {
     try {
-      const prompt = (req.body?.prompt ?? '').toString();
+      const rawPrompt = (req.body?.prompt ?? '').toString();
       const maxTokens = Math.max(1, Math.min(512, parseInt(req.body?.maxTokens) || 120));
-      if (!prompt || prompt.trim().length === 0) {
+      if (!rawPrompt || rawPrompt.trim().length === 0) {
         return res.status(400).json({ error: 'prompt is required' });
       }
+
+      // Use the same smart prompt builder as chat (verse lookup + good starter for explanations)
+      const prompt = await buildExplanationPrompt(rawPrompt);
       const text = await model.generate(prompt, maxTokens);
       res.json({ text, prompt });
     } catch (err: any) {
@@ -86,7 +90,7 @@ export async function startServer(port: number = 3000, loadDir: string = 'weight
     </div>
 
     <div class="inputbar">
-      <textarea id="prompt" placeholder="Ask anything... (e.g. What does it mean to trust in the Lord?)"></textarea>
+      <textarea id="prompt" placeholder="Ask anything... (e.g. Explain John 3:16 or Tell me about the Trinity)"></textarea>
       <button id="send">Send</button>
     </div>
     <div class="verse">"Trust in the Lord with all your heart, and lean not on your own understanding." — Proverbs 3:5</div>
@@ -124,11 +128,9 @@ export async function startServer(port: number = 3000, loadDir: string = 'weight
         });
         const data = await r.json();
         if (!r.ok) throw new Error(data?.error || 'Request failed');
-        // Show only the generated continuation for cleanliness.
-        // For subword models, exact prefix match may fail (UNKs in detok), so fallback to full text.
-        let out = data.text || '';
-        if (out.startsWith(prompt)) out = out.slice(prompt.length);
-        out = out.replace(/^[\s,.;:'"!?]+/, '').trim() || data.text || '(no new tokens)';
+        // generate() now returns pure continuation (new tokens only).
+        let out = (data.text || '').replace(/^[\s,.;:'"!?]+/, '').trim();
+        out = out.replace(/^(?:and |of |for |the |that |which |unto )+/i, '').trim() || '(no new tokens)';
         thinking.querySelector('.bubble').textContent = out;
       } catch (e) {
         thinking.querySelector('.bubble').textContent = 'Error: ' + (e?.message || e);

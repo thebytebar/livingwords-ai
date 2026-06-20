@@ -5,7 +5,7 @@ import { LivingWordsLLM } from '../core/model.js';
 import { configs } from '../core/config.js';
 
 program
-  .name('lw-llm')
+  .name('lw')
   .description('God-centered LLM CLI for training and generation')
   .version('0.1.0');
 

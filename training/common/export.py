@@ -317,4 +317,4 @@ def export_all(
 
     if also_onnx:
         target = legacy_dir / "model.onnx"
-        export_to_onnx(model, config, target, use_cache=True)  # cache-aware for efficient generation
+        export_to_onnx(model, config, target, use_cache=False)  # non-cache for reliable full-context generation (avoids past_len shape/mask issues in ONNX tracing + JS loop)

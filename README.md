@@ -65,8 +65,8 @@ The system is designed as a gated, reliable assistant:
 ## Features
 
 - Train small transformer models locally in Node.js (subword, CPU-friendly)
-- CLI chatbot (`lw-llm chat`)
-- Server/API mode (`lw-llm serve`) — REST API + served web chat UI
+- CLI chatbot (`lw chat`)
+- Server/API mode (`lw serve`) — REST API + served web chat UI
 - Full training pipeline with checkpoints and automatic save/load
 - `theoSmall` config targeting ~990k parameters with subword tokenization
 
@@ -80,13 +80,13 @@ npm install livingwords-llm
 
 ```bash
 # Generate text (uses the bundled default model, or --load for custom)
-npx lw-llm generate "In the beginning God created"
+npx lw generate "In the beginning God created"
 
 # Interactive chatbot
-npx lw-llm chat
+npx lw chat
 
 # Start server + web chat UI
-npx lw-llm serve --port 3000
+npx lw serve --port 3000
 ```
 
 ### Training (PyTorch)
@@ -102,7 +102,7 @@ python sft.py --data data/sft_sample.jsonl
 python dpo.py --data data/prefs_sample.jsonl
 ```
 
-Weights are automatically exported in the format expected by the TypeScript runtime (both legacy `weights.json` and modern `model.onnx`), so `lw-llm chat` etc. continue to work unchanged.
+Weights are automatically exported in the format expected by the TypeScript runtime (both legacy `weights.json` and modern `model.onnx`), so `lw chat` etc. continue to work unchanged.
 
 The runtime uses the ONNX backend (via `onnxruntime-node`, optional dep) when a `model.onnx` + `meta.json` is present (loaded via `.load()`). This is the currently supported inference path.
 

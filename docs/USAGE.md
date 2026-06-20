@@ -63,9 +63,9 @@ python pretrain.py --data ../data/pretrain_bible.txt --max-iters 1500
 
 After training, the TS/CLI tools can load the resulting `model.onnx` + `meta.json`.
 ```bash
-npx lw-llm chat --load weights/latest
+npx lw chat --load weights/latest
 ```
-A default pre-trained model is included in the package, so plain `npx lw-llm chat` works without training.
+A default pre-trained model is included in the package, so plain `npx lw chat` works without training.
 
 ## Training CLI Flags Explained
 
@@ -96,13 +96,13 @@ The final trained model is saved to `weights/`.
 
 ```bash
 # Generate
-npx lw-llm generate "What does the Bible say about grace?"
+npx lw generate "What does the Bible say about grace?"
 
 # Chat
-npx lw-llm chat
+npx lw chat
 
 # Serve web UI + API
-npx lw-llm serve --port 3000
+npx lw serve --port 3000
 ```
 
 ## Running the Server & API
@@ -118,7 +118,7 @@ A single-file web UI that works in any modern browser.
 ## Loading Specific Models & Checkpoints
 
 ```bash
-npx lw-llm chat --load weights/latest
+npx lw chat --load weights/latest
 ```
 
 ## Tips for Better Results
