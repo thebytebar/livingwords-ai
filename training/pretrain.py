@@ -27,12 +27,12 @@ from common.export import export_all
 
 def parse_args() -> argparse.Namespace:
     p = argparse.ArgumentParser(description="Pre-train LivingWords theoSmall in PyTorch")
-    p.add_argument("--data", type=str, default=str(Path(__file__).parent.parent / "data" / "pretrain_bible.txt"), help="Path to training text")
-    p.add_argument("--max-iters", type=int, default=1500, help="Total optimization steps")
-    p.add_argument("--batch-size", type=int, default=16)
-    p.add_argument("--lr", "--learning-rate", dest="lr", type=float, default=0.0008)
-    p.add_argument("--eval-interval", type=int, default=100, help="Print loss + sample every N steps")
-    p.add_argument("--save-interval", type=int, default=400, help="Export checkpoint every N steps")
+    p.add_argument("--data", type=str, required=True, help="Path to training text")
+    p.add_argument("--max-iters", type=int, default=5000, help="Total optimization steps")
+    p.add_argument("--batch-size", type=int, default=32)
+    p.add_argument("--lr", "--learning-rate", dest="lr", type=float, default=6e-4)
+    p.add_argument("--eval-interval", type=int, default=200, help="Print loss + sample every N steps")
+    p.add_argument("--save-interval", type=int, default=1000, help="Export checkpoint every N steps")
     p.add_argument("--block-size", type=int, default=None, help="Override (rare)")
     p.add_argument("--seed", type=int, default=1337)
     p.add_argument("--device", type=str, default="auto", help="cpu | cuda | mps | auto")

@@ -2,7 +2,7 @@
 
 This guide covers everything you need to train the model on new data, use the CLI tools, run the HTTP server/API, and use the web chat interface.
 
-> **Important Context**: LivingWords LLM is a small decoder-only transformer targeting ~500k parameters (`theoSmall` config). It uses small-vocab subword tokenization (~1536 tokens) built on top of tiktoken. The model is designed to run on standard laptops with no GPU. Training is performed with Python + PyTorch; inference uses ONNX Runtime (onnxruntime-node) by default. The "God-centered" alignment comes from curated biblical training data and a hybrid retrieval + generation system.
+> **Important Context**: LivingWords LLM is a small decoder-only transformer targeting ~900k parameters (`theoSmall` config). It uses small-vocab subword tokenization (~1536 tokens) built on top of tiktoken. The model is designed to run on standard laptops with no GPU. Training is performed with Python + PyTorch; inference uses ONNX Runtime (onnxruntime-node) by default. The "God-centered" alignment comes from curated biblical training data and a hybrid retrieval + generation system.
 
 ## Project Goals
 
@@ -41,13 +41,13 @@ This guide covers everything you need to train the model on new data, use the CL
 - WEB – World English Bible
 - YLT – Young’s Literal Translation
 
-**Fine-tuning data** (planned): 8,000–12,000 high-quality verse + explanation pairs sourced from curated Bible studies.
+**Fine-tuning data**: explanations of every verse in the Bible, cross references of Bible themes between Bible books, and curated high-quality Bible studies.
 
 The model uses **small-vocab subword tokenization** (~1536 tokens).
 
 ### Requirements
 
-- Plain text files (`.txt`)
+- Plain text files (`.jsonl`)
 - UTF-8 encoding
 - For best results, use clean, well-formatted biblical text
 
@@ -129,7 +129,7 @@ npx lw chat --load weights/latest
 
 ## Limitations
 
-- ~500k parameters (intentionally small)
+- ~900k parameters (intentionally small)
 - Primary strength is Scripture paraphrase and devotional writing
 - Not a general knowledge model
 - Subword vocabulary is limited to the most frequent tokens from the training corpus

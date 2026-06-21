@@ -33,10 +33,10 @@ from common.export import export_all
 
 def parse_args():
     p = argparse.ArgumentParser()
-    p.add_argument("--data", type=str, default="data/sft_sample.jsonl")
-    p.add_argument("--max-iters", type=int, default=500)
-    p.add_argument("--batch-size", type=int, default=4)
-    p.add_argument("--lr", type=float, default=5e-4)
+    p.add_argument("--data", type=str, required=True)
+    p.add_argument("--max-iters", type=int, default=1500)
+    p.add_argument("--batch-size", type=int, default=8)
+    p.add_argument("--lr", type=float, default=3e-4)
     p.add_argument("--block-size", type=int, default=256)
     p.add_argument("--device", default="auto")
     p.add_argument("--load", type=str, default=None, help="Directory containing model.pt (or model.safetensors) from pre-training")

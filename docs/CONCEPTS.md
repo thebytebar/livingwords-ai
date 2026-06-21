@@ -1,6 +1,6 @@
 # Educational Guide: Core Concepts in LivingWords LLM
 
-This document explains the fundamental ideas behind how this LLM works. It is written for developers who want to understand the "why" and "how" of building a small language model from scratch.
+This document explains the fundamental ideas behind how this LLM works. \
 
 LivingWords LLM is a **small decoder-only transformer** (~990k parameters in the `theoSmall` config). Training is performed in Python with PyTorch. Inference is implemented in TypeScript using ONNX Runtime (with `onnxruntime-node`). It is designed to run on normal laptops with no GPU and stay faithful to Scripture. The model uses **small-vocab subword tokenization** (~1536 tokens) for better coherence while remaining lightweight.
 
@@ -43,7 +43,7 @@ You give it:
 
 It tries to predict what comes next (e.g., "heavens").
 
-LivingWords LLM does exactly this, but at a deliberately small scale (~500k parameters) so it can run on ordinary laptops while still learning the style and tone of Scripture.
+LivingWords LLM does exactly this, but at a deliberately small scale (~900k parameters) so it can run on ordinary laptops while still learning the style and tone of Scripture.
 
 ---
 
@@ -55,7 +55,7 @@ Computers don't understand letters. They need numbers.
 
 LivingWords LLM uses a **compact subword vocabulary** of approximately 1536 tokens. It leverages tiktoken (`cl100k_base`) to generate high-quality subword splits, then keeps only the most frequent tokens from the training corpus.
 
-This approach gives better coherence than pure character-level tokenization while keeping the vocabulary small enough to stay within the ~500k parameter budget.
+This approach gives better coherence than pure character-level tokenization while keeping the vocabulary small enough to stay within the ~900k parameter budget.
 
 **Benefits of this approach**:
 - Much better at learning real words and theological terms than character-level
@@ -83,7 +83,6 @@ The `theoSmall` configuration targets approximately **990,000 parameters** (actu
 This size was chosen so that:
 - Training completes in reasonable time on a laptop
 - Inference is fast enough for interactive use
-- The model remains educational and understandable
 
 ---
 
@@ -102,4 +101,5 @@ The result is a model that can generate warm, scripture-flavored explanations wh
 ## Further Reading
 
 - [README.md](../README.md)
+- [docs/TRAINING_GUIDE.md](TRAINING_GUIDE.md)
 - [docs/USAGE.md](USAGE.md)

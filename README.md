@@ -9,7 +9,7 @@ A lightweight decoder-only transformer (theoSmall config) designed to run on nor
 Create a small, God-centered, open-source LLM that:
 - Runs comfortably on a standard laptop (e.g. MacBook Air M1/M2 with 8GB RAM)
 - Training uses Python + PyTorch; runtime is TypeScript with ONNX Runtime (onnxruntime-node, optional)
-- Remains lightweight and educational
+- Remains lightweight
 - Produces scripture-flavored explanations, devotional thoughts, and prayer language
 
 ## Key Constraints (Non-Negotiable)
@@ -39,7 +39,7 @@ Create a small, God-centered, open-source LLM that:
 - WEB – World English Bible
 - YLT – Young’s Literal Translation
 
-**Fine-tuning (Stage 2)**: High-quality verse + explanation pairs (target 8,000–12,000 examples) sourced from curated user Bible studies.
+**Fine-tuning (Stage 2)**: High-quality verse + explanation pairs, cross references between Bible themes and books, and high-quality curated user Bible studies.
 
 ## Desired Behavior (Hybrid System)
 
@@ -64,7 +64,7 @@ The system is designed as a gated, reliable assistant:
 
 ## Features
 
-- Train small transformer models locally in Node.js (subword, CPU-friendly)
+- Train small transformer models locally in Python (subword, CPU-friendly)
 - CLI chatbot (`lw chat`)
 - Server/API mode (`lw serve`) — REST API + served web chat UI
 - Full training pipeline with checkpoints and automatic save/load
@@ -91,7 +91,7 @@ npx lw serve --port 3000
 
 ### Training (PyTorch)
 
-Training (pretrain + SFT + DPO) has moved to Python/PyTorch. `theoSmall` is the only supported configuration.
+Training (pretrain + SFT + DPO) with Python/PyTorch. `theoSmall` is the only supported configuration.
 
 ```bash
 cd training
@@ -113,7 +113,8 @@ See [training/README.md](training/README.md) for full details.
 ## Documentation
 
 - **[docs/USAGE.md](docs/USAGE.md)** — Comprehensive usage guide
-- **[docs/CONCEPTS.md](docs/CONCEPTS.md)** — Educational deep dive into the architecture
+- **[docs/CONCEPTS.md](docs/CONCEPTS.md)** — Deep dive into the architecture
+- **[docs/TRAINING_GUIDE.md](docs/TRAINING_GUIDE.md)** — Comprehensive guide for training the model
 
 ## License
 

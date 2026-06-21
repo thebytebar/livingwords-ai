@@ -30,11 +30,11 @@ from common.export import export_all
 
 def parse_args():
     p = argparse.ArgumentParser()
-    p.add_argument("--data", type=str, default="data/prefs_sample.jsonl")
-    p.add_argument("--max-iters", type=int, default=200)
-    p.add_argument("--beta", type=float, default=0.1)
-    p.add_argument("--lr", type=float, default=5e-4)
-    p.add_argument("--batch-size", type=int, default=2)
+    p.add_argument("--data", type=str, required=True)
+    p.add_argument("--max-iters", type=int, default=400)
+    p.add_argument("--beta", type=float, default=0.15)
+    p.add_argument("--lr", type=float, default=2e-4)
+    p.add_argument("--batch-size", type=int, default=4)
     p.add_argument("--device", default="auto")
     p.add_argument("--load", type=str, default=None, help="Directory containing model.pt (or model.safetensors) from pre-training")
     return p.parse_args()

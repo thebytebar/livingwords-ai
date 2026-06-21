@@ -6,7 +6,7 @@ The model is a small decoder-only transformer (`theoSmall` config only):
 - ~990k parameters
 - `n_layer=6`, `n_embd=96`, `n_head=6`, `block_size=256`
 - Small-vocab subword tokenization (~1536 tokens) via pruned `cl100k_base` (tiktoken)
-- Primary data: public-domain Bible translations (see `../data/pretrain_bible.txt`)
+- Primary data: public-domain Bible translations (see `../data/pretrain/pretrain_bible.txt`)
 
 **The legacy TensorFlow.js backend is no longer supported.** Runtime / inference / CLI chat & serve use TypeScript with ONNX Runtime (onnxruntime-node).
 
@@ -26,7 +26,7 @@ pip install -r requirements.txt
 
 # 3. Pre-train (theoSmall is the ONLY supported config)
 python pretrain.py \
-  --data ../data/pretrain_bible.txt \
+  --data ../data/pretrain/pretrain_bible.txt \
   --max-iters 1500 \
   --batch-size 16 \
   --lr 0.0008 \
@@ -67,10 +67,10 @@ await model.load('weights/latest');
 
 ```bash
 # SFT (example — provide your own data)
-python sft.py --data data/sft_sample.jsonl --max-iters 400
+python sft.py --data ../data/stf/theological_triage_sft.jsonl --max-iters 400
 
 # DPO
-python dpo.py --data data/prefs_sample.jsonl --max-iters 200
+python dpo.py --data ../data/dpo/dpo_prefs.jsonl --max-iters 200
 ```
 
 See the sample data files and the scripts for the exact JSONL schema. Real SFT uses proper loss masking (only completion tokens contribute to loss). DPO uses a clean reference-free formulation.
@@ -80,7 +80,7 @@ See the sample data files and the scripts for the exact JSONL schema. Real SFT u
 A large curated SFT dataset (~1200 examples) focused on Christian theological triage and Bible study Q&A was created for this project. It is located at:
 
 ```
-data/theological_triage_sft.jsonl
+data/stf/theological_triage_sft.jsonl
 ```
 
 The dataset covers:
@@ -103,7 +103,7 @@ The data was generated to train the model to:
 This file can be used directly with:
 
 ```bash
-python sft.py --data data/theological_triage_sft.jsonl --max-iters 400
+python sft.py --data ../data/stf/theological_triage_sft.jsonl --max-iters 400
 ```
 
 ## Configuration

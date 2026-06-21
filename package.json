@@ -16,9 +16,7 @@
     "serve": "tsx src/cli/serve.ts",
     "dev": "tsx src/index.ts",
     "test": "echo \"Error: no test specified\" && exit 1",
-    "prepare": "npm run build && chmod +x dist/cli/index.js",
-    "clean:weights": "rm -rf weights/latest training/checkpoints || true",
-    "train:full": "npm run clean:weights && bash training/run_full_pipeline.sh"
+    "prepare": "npm run build && chmod +x dist/cli/index.js"
   },
   "keywords": [
     "llm",
