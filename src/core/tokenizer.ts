@@ -68,13 +68,18 @@ export function createSmallTiktokenTokenizer(
       return rawTokens.map(t => vocabMap.get(t) ?? unkId);
     },
     decode: (ids: number[]): string => {
-      // Map compact ids back to cl100k orig ids. Use replacement char for any
-      // that would produce the "!" byte (reserved/UNK ids). This prevents the
-      // confusing "!!Psalm" style garbage even if bad ids slip through.
+      // Map compact ids back to cl100k orig ids.
+      // Use replacement for unmapped/reserved ids. Legitimate kept tokens (incl. the "!" token id=0)
+      // decode normally.
       const pieces: string[] = [];
       for (const id of ids) {
-        const orig = (id >= 4 && id < origByCompact.length) ? origByCompact[id] : 0;
-        if (!orig) {
+        let orig = 0;
+        if (id >= 4 && id < origByCompact.length) {
+          const o = origByCompact[id];
+          if (o !== undefined) orig = o;
+        }
+        const wasBad = (orig === 0) && (id < 4 || origByCompact[id] !== 0);
+        if (wasBad) {
           pieces.push('\uFFFD'); // �
           continue;
         }

@@ -30,7 +30,7 @@ This guide covers everything you need to train the model on new data, use the CL
 
 ## Preparing Training Data
 
-**Pre-training data** uses the following eight public-domain Bible translations combined into `data/pretrain_bible.txt`:
+**Pre-training data** uses the following eight public-domain Bible translations combined into `data/pretrain/pretrain_bible.txt`:
 
 - AKJV – Authorized King James Version
 - ASV – American Standard Version
@@ -58,7 +58,7 @@ Training is performed with the Python scripts in the `training/` directory (PyTo
 ```bash
 cd training
 pip install -r requirements.txt
-python pretrain.py --data ../data/pretrain_bible.txt --max-iters 1500
+python pretrain.py --data ../data/pretrain/pretrain_bible.txt --max-iters 1500
 ```
 
 After training, the TS/CLI tools can load the resulting `model.onnx` + `meta.json`.
@@ -71,7 +71,7 @@ A default pre-trained model is included in the package, so plain `npx lw chat` w
 
 | Flag                | Default   | Description                                      | Recommended |
 |---------------------|-----------|--------------------------------------------------|-------------|
-| `--data`            | bible.txt | Path to training text                            | pretrain_bible.txt |
+| `--data`            | bible.txt | Path to training text                            | pretrain/pretrain_bible.txt |
 | `--model`           | theoSmall | Model config (theoSmall only)                    | theoSmall   |
 | `--epochs`          | 2         | Number of full passes                            | 3–6         |
 | `--max-iter`        | 1200      | Total training steps                             | 1500–3000   |

@@ -90,13 +90,19 @@ class SmallTiktokenTokenizer:
     def decode(self, ids: List[int]) -> str:
         if not ids:
             return ""
-        # Map back to original tiktoken ids (unknown compact ids become 0 which tiktoken will treat gracefully)
-        orig_ids = [self._reverse_map.get(i, 0) for i in ids]
-        # tiktoken decode expects a sequence of ints (Uint32Array in JS)
-        bytes_data = self.enc.decode(orig_ids)  # type: ignore[arg-type]
-        if isinstance(bytes_data, bytes):
-            return bytes_data.decode("utf-8", errors="replace")
-        return bytes_data  # already str in some versions
+        pieces: List[str] = []
+        for i in ids:
+            orig = self._reverse_map.get(i)
+            if orig is None:
+                pieces.append("\uFFFD")  # replacement to avoid "!" spam from fallback-0 (see JS parity)
+                continue
+            try:
+                b = self.enc.decode([orig])  # type: ignore[arg-type]
+                s = b.decode("utf-8", errors="replace") if isinstance(b, (bytes, bytearray)) else str(b)
+                pieces.append(s)
+            except Exception:
+                pieces.append("\uFFFD")
+        return "".join(pieces)
 
     def __repr__(self) -> str:
         return (
@@ -115,14 +121,31 @@ def create_small_tiktoken_tokenizer(
     Preferred usage in training: pass fixed_kept_orig_ids loaded from training/data/kept_ids.json
     so we never depend on re-scanning a huge corpus.
     """
-    if fixed_kept_orig_ids is None and not corpus:
-        # Try to load the committed canonical kept list (guarantees parity with JS runtime)
+    if fixed_kept_orig_ids is None:
+        # Try to load the committed canonical kept list (guarantees parity with JS runtime).
+        # We load json even if corpus is passed: fixed list takes precedence for exact parity.
         candidate = Path(__file__).resolve().parents[2] / "training" / "data" / "kept_ids.json"
         if candidate.exists():
             try:
                 fixed_kept_orig_ids = load_kept_ids(candidate)
             except Exception:
                 pass
+        if fixed_kept_orig_ids is None or len(fixed_kept_orig_ids) == 0:
+            # Fallback: derive from the standard pretrain corpus so default creation always works
+            root = Path(__file__).resolve().parents[2]
+            for rel in [
+                "data/pretrain/pretrain_bible.txt",
+                "training/data/pretrain/pretrain_bible.txt",
+            ]:
+                p = root / rel
+                try:
+                    if p.exists():
+                        c = p.read_text(encoding="utf-8")
+                        if len(c) > 1000:
+                            corpus = c
+                            break
+                except Exception:
+                    pass
     return SmallTiktokenTokenizer(
         target_vocab_size=target_vocab_size,
         kept_orig_ids=fixed_kept_orig_ids,

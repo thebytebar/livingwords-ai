@@ -28,7 +28,7 @@ Create a small, God-centered, open-source LLM that:
 
 ## Data Strategy
 
-**Pre-training**: Eight public-domain Bible translations combined into a single corpus (`data/pretrain_bible.txt`):
+**Pre-training**: Eight public-domain Bible translations combined into a single corpus (`data/pretrain/pretrain_bible.txt`):
 
 - AKJV – Authorized King James Version
 - ASV – American Standard Version
@@ -96,7 +96,7 @@ Training (pretrain + SFT + DPO) with Python/PyTorch. `theoSmall` is the only sup
 ```bash
 cd training
 pip install -r requirements.txt
-python pretrain.py --data ../data/pretrain_bible.txt --max-iters 1500
+python pretrain.py --data ../data/pretrain/pretrain_bible.txt --max-iters 1500
 # or
 python sft.py --data data/sft_sample.jsonl
 python dpo.py --data data/prefs_sample.jsonl

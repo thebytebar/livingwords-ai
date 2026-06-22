@@ -5,7 +5,7 @@ Pre-training script for LivingWords LLM (theoSmall only).
 Replaces the old TF.js training loop.
 
 Example:
-  python pretrain.py --data ../data/pretrain_bible.txt --max-iters 1500 --batch-size 16 --lr 0.0008
+  python pretrain.py --data ../data/pretrain/pretrain_bible.txt --max-iters 1500 --batch-size 16 --lr 0.0008
 """
 
 from __future__ import annotations
@@ -60,10 +60,7 @@ def main():
     if args.block_size:
         cfg = ModelConfig(**{**cfg.__dict__, "block_size": args.block_size})
 
-    # Tokenizer (will auto-load the committed kept_ids.json for perfect parity with JS)
-    tokenizer = create_small_tiktoken_tokenizer(target_vocab_size=cfg.vocab_size)
-
-    # Data
+    # Data (load first so we can build tokenizer from the actual corpus if needed)
     data_path = Path(args.data)
     if not data_path.exists():
         print(f"Data not found at {data_path}, using tiny synthetic Bible text for smoke test.")
@@ -72,7 +69,20 @@ def main():
     else:
         text = data_path.read_text(encoding="utf-8")
 
+    # Tokenizer (will auto-load the committed kept_ids.json for perfect parity with JS,
+    # or derive from corpus when missing)
+    norm_text = text.lstrip("\ufeff").replace("\r\n", "\n").replace("\r", "\n")
+    tokenizer = create_small_tiktoken_tokenizer(corpus=norm_text, target_vocab_size=cfg.vocab_size)
+    print(f"Tokenizer ready: kept={len(tokenizer.kept_orig_ids)} tokens (target vocab {cfg.vocab_size})")
+
     ds = build_pretrain_dataset(text, tokenizer, block_size=cfg.block_size)
+
+    # Sanity: if nearly everything is UNK=1 the model will trivially "learn" and output garbage
+    sample_tokens = ds.get_batch(1).x[0].tolist()
+    unk_ratio = sum(1 for t in sample_tokens if t == 1) / max(1, len(sample_tokens))
+    if unk_ratio > 0.95:
+        print("⚠️  WARNING: >95% of tokens are UNK (id=1). Tokenizer kept list is probably empty or wrong!")
+        print("    This will cause instant loss=0 and '!' samples. Check kept_ids.json or corpus.")
 
     # Model
     model = GPT(cfg).to(device)
@@ -113,7 +123,8 @@ def main():
                 if len(seed) > cfg.block_size:
                     seed = seed[-cfg.block_size:]
                 elif len(seed) < cfg.block_size:
-                    seed = [0] * (cfg.block_size - len(seed)) + seed
+                    # right-pad to keep content at low positions (consistent with inference)
+                    seed = seed + [0] * (cfg.block_size - len(seed))
                 idx = torch.tensor([seed], dtype=torch.long, device=device)
                 out = model.generate(idx, max_new_tokens=48, temperature=0.7, do_sample=True)
                 generated = tokenizer.decode(out[0].tolist())
@@ -128,16 +139,18 @@ def main():
             ckpt_path = ckpt_dir / f"checkpoint-{step:05d}"
             ckpt_path.mkdir(parents=True, exist_ok=True)
             torch.save(model.state_dict(), ckpt_path / "model.pt")
-            export_all(model, cfg, tokenizer, legacy_dir=ckpt_path, write_legacy_weights=False)
+            export_all(model, cfg, tokenizer, legacy_dir=ckpt_path, modern_dir=ckpt_path, write_legacy_weights=False)
             # Also update latest (for convenience with existing CLI)
-            export_all(model, cfg, tokenizer, legacy_dir=latest_dir, write_legacy_weights=False)
+            export_all(model, cfg, tokenizer, legacy_dir=latest_dir, modern_dir=latest_dir, write_legacy_weights=False)
+            torch.save(model.state_dict(), latest_dir / "model.pt")
 
     total = time.time() - start
     print(f"\n✅ Pre-training complete. Total time: {total:.1f}s")
 
     # Final export to ../weights/ and latest (no legacy weights by default)
-    export_all(model, cfg, tokenizer, legacy_dir=latest_dir, write_legacy_weights=False)
-    export_all(model, cfg, tokenizer, legacy_dir=weights_dir, write_legacy_weights=False)
+    export_all(model, cfg, tokenizer, legacy_dir=latest_dir, modern_dir=latest_dir, write_legacy_weights=False)
+    torch.save(model.state_dict(), latest_dir / "model.pt")
+    export_all(model, cfg, tokenizer, legacy_dir=weights_dir, modern_dir=weights_dir, write_legacy_weights=False)
 
     print("Done. You can now run: npx lw chat   (or point --load at one of the checkpoint dirs)")
 

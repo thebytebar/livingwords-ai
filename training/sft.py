@@ -39,7 +39,8 @@ def parse_args():
     p.add_argument("--lr", type=float, default=3e-4)
     p.add_argument("--block-size", type=int, default=256)
     p.add_argument("--device", default="auto")
-    p.add_argument("--load", type=str, default=None, help="Directory containing model.pt (or model.safetensors) from pre-training")
+    p.add_argument("--load", type=str, default=None, help="Directory containing model.pt (or model.safetensors) from pre-training or prior stage")
+    p.add_argument("--save-interval", type=int, default=0, help="Export checkpoint every N steps (0 disables; checkpoints go to training/checkpoints/)")
     return p.parse_args()
 
 
@@ -92,14 +93,25 @@ def main():
             continue
         full = p_ids + c_ids
         labels = [-100] * len(p_ids) + c_ids
-        # Truncate or pad to block_size (left pad with 0 for positions, but labels stay -100 for pads if any)
+        # Optimize for SFT:
+        # - Always keep the full prompt (instruction) + as much *prefix* of the completion as fits.
+        #   Truncating from the front (as before) drops the thing being explained.
+        # - Right-pad short examples (append 0s) so content starts at position 0.
+        #   This matches how inference feeds prompts (no left-pad) + absolute wpe.
+        #   (Previous left-pad put SFT content at high positions, causing train/infer mismatch.)
         if len(full) > cfg.block_size:
-            full = full[-cfg.block_size:]
-            labels = labels[-cfg.block_size:]
-        else:
+            max_c = cfg.block_size - len(p_ids)
+            if max_c > 0:
+                full = p_ids + c_ids[:max_c]
+                labels = [-100] * len(p_ids) + c_ids[:max_c]
+            else:
+                # Prompt alone too long (rare): keep tail of prompt + start of c
+                full = (p_ids + c_ids)[-cfg.block_size:]
+                labels = ([-100] * len(p_ids) + c_ids)[-cfg.block_size:]
+        if len(full) < cfg.block_size:
             pad_len = cfg.block_size - len(full)
-            full = [0] * pad_len + full
-            labels = [-100] * pad_len + labels
+            full = full + [0] * pad_len
+            labels = labels + [-100] * pad_len
         training_pairs.append((full, labels))
 
     if not training_pairs:
@@ -134,6 +146,7 @@ def main():
 
     root = Path(__file__).resolve().parents[1]
     latest = root / "weights" / "latest"
+    ckpt_dir = Path(__file__).parent / "checkpoints"
 
     for step in range(1, args.max_iters + 1):
         model.train()
@@ -155,8 +168,19 @@ def main():
         if step % 50 == 0 or step == 1:
             print(f"SFT step {step}/{args.max_iters} | loss {loss.item():.4f}")
 
+        if args.save_interval > 0 and step % args.save_interval == 0:
+            print(f"\n💾 Saving SFT checkpoint at step {step}...")
+            ckpt_path = ckpt_dir / f"checkpoint-sft-{step:05d}"
+            ckpt_path.mkdir(parents=True, exist_ok=True)
+            torch.save(model.state_dict(), ckpt_path / "model.pt")
+            export_all(model, cfg, tok, legacy_dir=ckpt_path, modern_dir=ckpt_path, write_legacy_weights=False)
+            # Keep latest fresh so you can --load it for DPO or further runs
+            export_all(model, cfg, tok, legacy_dir=latest, modern_dir=latest, write_legacy_weights=False)
+            torch.save(model.state_dict(), latest / "model.pt")
+
     print("✅ SFT complete (with loss masking on completions).")
-    export_all(model, cfg, tok, legacy_dir=latest, write_legacy_weights=False)
+    export_all(model, cfg, tok, legacy_dir=latest, modern_dir=latest, write_legacy_weights=False)
+    torch.save(model.state_dict(), latest / "model.pt")
     print("Exported to weights/latest (usable with lw chat)")
 
 

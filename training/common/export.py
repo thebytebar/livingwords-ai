@@ -52,6 +52,8 @@ def _transpose_linear_weight(w: torch.Tensor) -> torch.Tensor:
 
 
 def export_to_legacy_dict(model: torch.nn.Module, config: ModelConfig, kept_orig_ids: List[int]) -> Dict[str, Any]:
+    if not kept_orig_ids or len(kept_orig_ids) < 10:
+        print("⚠️  export: kept_orig_ids is empty or tiny — the exported model will use a broken tokenizer mapping!")
     """
     Build the exact dict structure expected by src/core/utils.ts (withModelHelpers + setWeights).
     The order of keys does not matter for the loader (it looks up by name), but we try to follow
@@ -289,6 +291,8 @@ def export_all(
     also_onnx: bool = True,
     write_legacy_weights: bool = False,  # Default False: no need for TS runtime anymore
 ) -> None:
+    if not tokenizer.kept_orig_ids or len(tokenizer.kept_orig_ids) < 10:
+        print("⚠️  export_all: tokenizer has very few kept ids — exported tokenizer mapping will be broken!")
     if write_legacy_weights:
         save_legacy_checkpoint(model, config, tokenizer, legacy_dir)
     else:

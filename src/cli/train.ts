@@ -15,7 +15,7 @@ To train (theoSmall is the only supported configuration):
 
   cd training
   pip install -r requirements.txt
-  python pretrain.py --data ../data/pretrain_bible.txt --max-iters 1500
+  python pretrain.py --data ../data/pretrain/pretrain_bible.txt --max-iters 1500
 
   # or for SFT / DPO
   python sft.py --data data/sft_sample.jsonl

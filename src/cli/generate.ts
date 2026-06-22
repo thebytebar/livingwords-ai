@@ -3,7 +3,6 @@
 import { program } from 'commander';
 import { LivingWordsLLM } from '../core/model.js';
 import { configs } from '../core/config.js';
-import { buildExplanationPrompt } from '../core/verse.js';
 
 program
   .name('lw generate')
@@ -14,9 +13,7 @@ program
     const model = new LivingWordsLLM(configs.theoSmall);
     await model.load(undefined, { silent: true });
 
-    // Use smart prompting for verse explanations and theological questions
-    const smartPrompt = await buildExplanationPrompt(prompt);
-    const result = await model.generate(smartPrompt, parseInt(options.maxTokens));
+    const result = await model.generate(prompt, parseInt(options.maxTokens));
     console.log('\n' + result);
   });
 

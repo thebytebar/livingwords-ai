@@ -52,6 +52,15 @@ export interface GenerateOptions {
   repetitionPenalty?: number;
   /** Optional callback for streaming tokens (receives the raw compact token id) */
   onToken?: (tokenId: number) => void;
+  /**
+   * Whether to apply the pretrain-era logit mask that suppresses Bible ref starters
+   * (e.g. "Genesis 1:1", "Psalm N:N") in the first ~10 tokens.
+   * Default true (safe for base model). Set to false after SFT on explanation/QA pairs
+   * so the model can emit the trained starts like "Genesis 1:1 declares...".
+   */
+  suppressBibleRefStarters?: boolean;
+  /** When false, do not strip a leading "Genesis 1:1 ..." etc after decoding. Needed for SFT explanation outputs. */
+  stripLeadingRef?: boolean;
 }
 
 /**
@@ -116,10 +125,12 @@ export async function runGenerationLoop(
     // common book-name starter tokens for the first few steps produces much saner continuations
     // for user questions like "Tell me about the trinity".
     const earlyStep = i < 10;
-    if (earlyStep) {
-      // Colon (needed for "N:N") + semicolon + first BPE piece of common book names + number starters.
-      // The model loves emitting "6;9", "11;22" style references because of the training data.
-      // We suppress them for the first several generated tokens on Q&A prompts.
+    // This early ref suppression was added for raw pretrain Bible text (which is full of
+    // "Psalm 23:1 ..." lines). It is harmful after SFT on "explain bible verse ..." pairs
+    // because the desired continuations legitimately start with "Genesis 1:1 ...".
+    // Default on for compatibility with untuned models; pass false from high-level generate
+    // after SFT.
+    if (earlyStep && (options.suppressBibleRefStarters ?? true)) {
       const refIds = [7, 16, 26, 31, 60, 66, 68, 74, 75, 76, 80, 81, 83, 85, 91, 93, 96, 98, 104, 111, 117, 125, 128, 131, 132, 133, 139, 144, 147, 148, 153, 156, 159, 169, 170, 172, 175, 180, 190, 193, 200, 202, 205, 212, 226, 234, 247, 255, 272, 345, 366, 391, 430, 446, 463];
       for (const id of refIds) {
         if (id < lastLogits.length) lastLogits[id] = -Infinity;

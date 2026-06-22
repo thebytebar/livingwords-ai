@@ -36,7 +36,8 @@ def parse_args():
     p.add_argument("--lr", type=float, default=2e-4)
     p.add_argument("--batch-size", type=int, default=4)
     p.add_argument("--device", default="auto")
-    p.add_argument("--load", type=str, default=None, help="Directory containing model.pt (or model.safetensors) from pre-training")
+    p.add_argument("--load", type=str, default=None, help="Directory containing model.pt (or model.safetensors) from SFT or prior stage")
+    p.add_argument("--save-interval", type=int, default=0, help="Export checkpoint every N steps (0 disables; checkpoints go to training/checkpoints/)")
     return p.parse_args()
 
 def get_device(n):
@@ -125,6 +126,7 @@ def main():
 
     root = Path(__file__).resolve().parents[1]
     latest = root / "weights" / "latest"
+    ckpt_dir = Path(__file__).parent / "checkpoints"
 
     for step in range(1, args.max_iters + 1):
         total_loss = 0.0
@@ -153,8 +155,19 @@ def main():
         if step % 20 == 0 or step == 1:
             print(f"DPO step {step}/{args.max_iters} | loss {(total_loss.item() / max(1,args.batch_size)):.4f}")
 
+        if args.save_interval > 0 and step % args.save_interval == 0:
+            print(f"\n💾 Saving DPO checkpoint at step {step}...")
+            ckpt_path = ckpt_dir / f"checkpoint-dpo-{step:05d}"
+            ckpt_path.mkdir(parents=True, exist_ok=True)
+            torch.save(model.state_dict(), ckpt_path / "model.pt")
+            export_all(model, cfg, tok, legacy_dir=ckpt_path, modern_dir=ckpt_path, write_legacy_weights=False)
+            # Keep latest fresh
+            export_all(model, cfg, tok, legacy_dir=latest, modern_dir=latest, write_legacy_weights=False)
+            torch.save(model.state_dict(), latest / "model.pt")
+
     print("✅ DPO complete.")
-    export_all(model, cfg, tok, legacy_dir=latest, write_legacy_weights=False)
+    export_all(model, cfg, tok, legacy_dir=latest, modern_dir=latest, write_legacy_weights=False)
+    torch.save(model.state_dict(), latest / "model.pt")
 
 if __name__ == "__main__":
     main()

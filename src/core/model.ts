@@ -210,7 +210,7 @@ export class LivingWordsLLM {
       } else {
         // Re-derive if no kept ids (rare for new exports)
         let corpus = '';
-        const candidates = ['data/pretrain_bible.txt', 'data/bibles/kjv.txt', 'data/bibles/web.txt'];
+        const candidates = ['data/pretrain/pretrain_bible.txt', 'data/pretrain_bible.txt', 'data/bibles/kjv.txt', 'data/bibles/web.txt'];
         for (const p of candidates) {
           try {
             const fsmod = await import('fs/promises');
@@ -219,7 +219,7 @@ export class LivingWordsLLM {
           } catch {}
         }
         if (!corpus || corpus.length < 2000) {
-          corpus = await this.fetchText('data/pretrain_bible.txt');
+          corpus = await this.fetchText('data/pretrain/pretrain_bible.txt');
         }
         swTok = createSmallTiktokenTokenizer(corpus, meta.vocabSize || 1536);
       }
@@ -275,7 +275,7 @@ export class LivingWordsLLM {
       'Use the scripts in the training/ directory:\n' +
       '  cd training\n' +
       '  pip install -r requirements.txt\n' +
-      '  python pretrain.py --data ../data/pretrain_bible.txt --max-iters 1500\n\n' +
+      '  python pretrain.py --data ../data/pretrain/pretrain_bible.txt --max-iters 1500\n\n' +
       'SFT and DPO are also available (python sft.py / dpo.py).\n' +
       'See training/README.md for details. The resulting weights/ are compatible with this class.'
     );
@@ -289,7 +289,7 @@ export class LivingWordsLLM {
       return prompt + '\n\n[No model loaded. Use --load <dir> or ensure model.onnx + meta.json are present (bundled default or after training).]';
     }
 
-    console.log(`🤖 Generating God-centered continuation for: "${prompt}" (via ${this.backend.constructor.name})`);
+    console.log(`🤖 Generating from prompt: "${prompt}" (via ${this.backend.constructor.name})`);
     try {
       const seedTokens = this.tokenizer!.encode(prompt);
       const genOpts: GenerateOptions = {
@@ -299,35 +299,15 @@ export class LivingWordsLLM {
         topK: 40,
         topP: 0.9,
         repetitionPenalty: 1.12,
+        suppressBibleRefStarters: false,
       };
       const outTokens = await runGenerationLoop(this.backend, seedTokens, genOpts);
-      // Return ONLY the continuation (new tokens after the prompt seed).
-      let continuation = this.tokenizer!.decode(outTokens.slice(seedTokens.length));
-
-      // Post-process: the base pretrain model (Bible next-token) loves to start every
-      // continuation with a random "Psalm N:N" or "Matthew X:Y" header because that's
-      // what the training distribution looks like. For user questions we strip the
-      // leading ref so the answer doesn't begin "Psalm 35:17 How long...".
-      // Also strip bare "N:N" or "N;N" patterns that the model loves to emit.
-      continuation = continuation.replace(
-        /^\s*(?:Genesis|Exodus|Leviticus|Numbers|Deuteronomy|Joshua|Judges|Ruth|1?\s*Samuel|2?\s*Samuel|1?\s*Kings|2?\s*Kings|1?\s*Chronicles|2?\s*Chronicles|Ezra|Nehemiah|Esther|Job|Psalm|Psalms|Proverbs|Ecclesiastes|Song of Solomon|Isaiah|Jeremiah|Lamentations|Ezekiel|Daniel|Hosea|Joel|Amos|Obadiah|Jonah|Micah|Nahum|Habakkuk|Zephaniah|Haggai|Zechariah|Malachi|Matthew|Mark|Luke|John|Acts|Romans|1?\s*Corinthians|2?\s*Corinthians|Galatians|Ephesians|Philippians|Colossians|1?\s*Thessalonians|2?\s*Thessalonians|1?\s*Timothy|2?\s*Timothy|Titus|Philemon|Hebrews|James|1?\s*Peter|2?\s*Peter|1?\s*John|2?\s*John|3?\s*John|Jude|Revelation)?\s*\d{1,3}[:;.]?\s*\d{0,3}\s*/i,
-        ''
-      );
-      // Drop leading spaces/punct and also a few very common Bible-sentence starters that
-      // otherwise make answers begin "and the ...", "of the ...", "for he ...".
-      continuation = continuation.replace(/^[\s,.;:'"!?]+/, '');
-      continuation = continuation.replace(/^(?:and |of |for |the |that |which |unto |in the |with the |to the )+/i, '');
-      continuation = continuation.trim();
-
-      // Make it look a tiny bit more like a sentence start for user-facing output.
-      if (continuation && /^[a-z]/.test(continuation)) {
-        continuation = continuation[0].toUpperCase() + continuation.slice(1);
-      }
-
-      return continuation || '[...]';
+      // Return ONLY the raw continuation (new tokens after the prompt seed). No rewriting.
+      const continuation = this.tokenizer!.decode(outTokens.slice(seedTokens.length));
+      return continuation;
     } catch (err) {
       console.error('Generation error:', err);
-      return '[...]';
+      return '';
     }
   }
 }

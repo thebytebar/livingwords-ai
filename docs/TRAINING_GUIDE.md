@@ -93,7 +93,7 @@ python sft.py --data ../data/stf/theological_triage_sft.jsonl --load ../weights/
 ```
 
 **Notes**:
-- `--load` points to a directory containing `model.pt` or `model.safetensors` (weights/latest or any checkpoint-XXXXX/).
+- `--load` points to a directory containing `model.pt` or `model.safetensors` (e.g. `weights/latest`, or any `checkpoint-XXXXX/`, `checkpoint-sft-XXXXX/`, `checkpoint-dpo-XXXXX/`).
 - The theological triage dataset is specifically curated for this project.
 - If using custom data, ensure JSONL lines contain at minimum `prompt` + `completion`.
 - Exports updated `model.onnx` etc. to `weights/latest/` at the end.
@@ -160,7 +160,7 @@ npx lw chat --load weights/latest
 | `--batch-size`        | int     | 32        | Number of sequences per training step. |
 | `--lr`, `--learning-rate` | float | 6e-4    | Learning rate for the optimizer. |
 | `--eval-interval`     | int     | 200       | Print loss and generate a sample every N steps. |
-| `--save-interval`     | int     | 1000      | Export full checkpoint (ONNX + meta) every N steps. |
+| `--save-interval`     | int     | 1000      | Export full checkpoint (including model.pt) every N steps. Also refreshes `weights/latest`. |
 | `--block-size`        | int     | None      | Override context length (rarely needed; uses config default of 256). |
 | `--seed`              | int     | 1337      | Random seed for reproducibility. |
 | `--device`            | str     | auto      | `cpu`, `cuda`, `mps`, or `auto` (detects best available). |
@@ -175,7 +175,8 @@ npx lw chat --load weights/latest
 | `--lr`           | float   | 3e-4      | Learning rate. |
 | `--block-size`   | int     | 256       | Context length (must match model). |
 | `--device`       | str     | auto      | Device to train on. |
-| `--load`         | str     | None      | Directory containing a pre-trained checkpoint (`model.pt` or `model.safetensors`) to continue from. |
+| `--load`         | str     | None      | Directory containing a checkpoint (`model.pt` or `model.safetensors`) to continue from (weights/latest or a checkpoint dir). |
+| `--save-interval` | int   | 0         | If >0, export a checkpoint (to training/checkpoints/) every N steps and keep `weights/latest` updated for easy resumption. |
 
 ### dpo.py
 
@@ -187,7 +188,8 @@ npx lw chat --load weights/latest
 | `--lr`           | float   | 2e-4      | Learning rate (kept low for gentle updates). |
 | `--batch-size`   | int     | 4         | Number of preference pairs per step. |
 | `--device`       | str     | auto      | Device to train on. |
-| `--load`         | str     | None      | Directory containing the SFT checkpoint to start from. |
+| `--load`         | str     | None      | Directory containing the SFT (or prior) checkpoint to start from (`weights/latest` etc.). |
+| `--save-interval` | int   | 0         | If >0, export intermediate checkpoints and keep `weights/latest` fresh. |
 
 ## Optimization Tips for Maximum Coherency
 

@@ -29,7 +29,7 @@ program
 Training now lives in Python + PyTorch (theoSmall only).
 
   cd training && pip install -r requirements.txt
-  python pretrain.py --max-iters 1500 --data ../data/pretrain_bible.txt
+  python pretrain.py --max-iters 1500 --data ../data/pretrain/pretrain_bible.txt
 
 See training/README.md. The resulting weights/ are directly usable by chat/serve/generate.
 `);
@@ -54,9 +54,10 @@ program
   .command('chat')
   .description('Interactive CLI chatbot')
   .option('-l, --load <dir>', 'Directory with saved weights/meta', 'weights')
+  .option('--dpo', 'Enable live DPO preference capture (A=approve/chosen, R=reject)')
   .action(async (options) => {
     const { startChat } = await import('./chat.js');
-    await startChat(options.load);
+    await startChat(options.load, { dpo: !!options.dpo });
   });
 
 program
