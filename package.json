@@ -1,29 +1,30 @@
 {
   "name": "livingwords-llm",
   "version": "0.1.0",
-  "description": "Open-source God-centered LLM aligned with Christian theological doctrine. Small decoder-only transformer (theoSmall config) for Scripture paraphrase, devotional writing, and verse explanation. Training: Python + PyTorch. Inference: TypeScript with ONNX Runtime (onnxruntime-node, optional).",
+  "description": "Local-first, source-grounded RAG using pretrained Gemma 4 E2B and an Apple Silicon-friendly MLX runtime.",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
   "bin": {
     "lw": "dist/cli/index.js"
   },
   "scripts": {
-    "build": "rm -rf dist && tsc",
-    "postbuild": "chmod +x dist/cli/index.js",
+    "build": "node scripts/build.mjs",
     "start": "node dist/cli/index.js",
-    "generate": "tsx src/cli/generate.ts",
-    "chat": "tsx src/cli/chat.ts",
-    "serve": "tsx src/cli/serve.ts",
+    "generate": "tsx src/cli/index.ts generate",
+    "chat": "tsx src/cli/index.ts chat",
+    "serve": "tsx src/cli/index.ts serve",
     "dev": "tsx src/index.ts",
-    "test": "echo \"Error: no test specified\" && exit 1",
-    "prepare": "npm run build && chmod +x dist/cli/index.js"
+    "test": "tsx --test src/core/rag.test.ts src/core/model-server.test.ts src/cli/serve.test.ts",
+    "postinstall": "node scripts/install-local-model.mjs",
+    "prepare": "npm run build"
   },
   "keywords": [
     "llm",
     "transformer",
     "gpt",
-    "pytorch",
-    "onnx",
+    "gemma",
+    "mlx",
+    "rag",
     "bible",
     "christian",
     "faith-tech",
@@ -38,24 +39,16 @@
   "engines": {
     "node": ">=18 <23"
   },
-  "files": [
-    "dist",
-    "weights"
-  ],
+  "files": ["dist", "scripts/install-local-model.mjs"],
   "type": "module",
   "devDependencies": {
     "@types/express": "^5.0.6",
-    "@types/fs-extra": "^11.0.4",
     "@types/node": "^25.9.3",
-    "ts-node": "^10.9.2",
     "tsx": "^4.22.4",
     "typescript": "^6.0.3"
   },
   "dependencies": {
     "commander": "^15.0.0",
-    "express": "^5.2.1",
-    "fs-extra": "^11.3.5",
-    "tiktoken": "^1.0.22",
-    "onnxruntime-node": "^1.20.1"
+    "express": "^5.2.1"
   }
 }
