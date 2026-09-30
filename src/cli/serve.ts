@@ -2,7 +2,7 @@
 /**
  * Server + Web Chat UI for LivingWords LLM
  * Provides:
- *  - POST /api/generate  { prompt: string, maxTokens?: number } -> { text: string }
+ *  - POST /api/ask  { question: string, maxTokens?: number } -> answer + grounding status + sources
  *  - GET /  -> single-file web chat interface (vanilla HTML/JS)
  *
  * Usage:
@@ -10,36 +10,54 @@
  */
 
 import express from 'express';
-import { LivingWordsLLM } from '../core/model.js';
-import { configs } from '../core/config.js';
+import { answerQuestion, readIndexIfPresent, UNGROUNDED_NOTICE, type RagIndex } from '../core/rag.js';
+import { generateLocalChatCompletion, gemma4DefaultModel } from '../core/local-model.js';
+import { ensureLocalModelServer, stopLocalModelServer } from '../core/model-server.js';
 
-export async function startServer(port: number = 3000, loadDir: string = 'weights'): Promise<void> {
+type ChatGenerator = (systemPrompt: string, userPrompt: string, maxTokens: number) => Promise<string>;
+
+export function createApp(
+  index: RagIndex | null,
+  generate: ChatGenerator = generateLocalChatCompletion,
+): express.Express {
   const app = express();
   app.use(express.json({ limit: '1mb' }));
 
-  const model = new LivingWordsLLM(configs.theoSmall);
-  await model.load(loadDir);
-
-  // API for generation (used by web UI and external clients)
-  app.post('/api/generate', async (req, res) => {
+  const handleAsk: express.RequestHandler = async (req, res) => {
     try {
-      const prompt = (req.body?.prompt ?? '').toString();
-      const maxTokens = Math.max(1, Math.min(512, parseInt(req.body?.maxTokens) || 120));
-      if (!prompt || prompt.trim().length === 0) {
-        return res.status(400).json({ error: 'prompt is required' });
+      const question = typeof req.body?.question === 'string'
+        ? req.body.question
+        : typeof req.body?.prompt === 'string' ? req.body.prompt : '';
+      if (!question.trim()) {
+        res.status(400).json({ error: 'question is required' });
+        return;
       }
 
-      const text = await model.generate(prompt, maxTokens);
-      res.json({ text, prompt });
-    } catch (err: any) {
-      console.error('API /generate error:', err);
-      res.status(500).json({ error: 'generation failed', message: String(err?.message || err) });
+      const requestedMaxTokens = Number.parseInt(req.body?.maxTokens, 10);
+      const maxTokens = Number.isFinite(requestedMaxTokens)
+        ? Math.max(1, Math.min(512, requestedMaxTokens))
+        : 384;
+      const result = await answerQuestion(question, index, {
+        maxTokens,
+        generate,
+      });
+      res.json({ ...result, text: result.answer, question });
+    } catch (error) {
+      console.error('API /ask error:', error);
+      res.status(500).json({ error: 'answer generation failed', message: String(error) });
     }
-  });
+  };
+  app.post('/api/ask', handleAsk);
+  app.post('/api/generate', handleAsk);
 
   // Simple health
   app.get('/api/health', (_req, res) => {
-    res.json({ ok: true, model: 'livingwords-llm', loaded: true });
+    res.json({
+      ok: true,
+      model: process.env.LW_MODEL || gemma4DefaultModel,
+      ragAvailable: index !== null,
+      passages: index?.passages.length ?? 0,
+    });
   });
 
   // Single-file web chat UI (God-centered, minimal, accessible)
@@ -78,20 +96,25 @@ export async function startServer(port: number = 3000, loadDir: string = 'weight
   <div class="header">
     <div class="logo">✝︎</div>
     <h1>LivingWords LLM</h1>
-    <div class="tag">God-centered • Lightweight</div>
+    <div class="tag">Local AI • Gemma 4</div>
   </div>
 
   <div class="chat">
     <div id="messages" class="messages">
-      <div class="empty">Ask a question or share a prompt. Responses are generated from a small transformer trained to be faithful to Scripture.</div>
+      <div class="empty">${index
+        ? `Source grounding is enabled with ${index.passages.length} indexed passages.`
+        : UNGROUNDED_NOTICE}</div>
     </div>
 
     <div class="inputbar">
-      <textarea id="prompt" placeholder="Ask anything... (e.g. Explain John 3:16 or Tell me about the Trinity)"></textarea>
+      <textarea id="prompt" placeholder="${index
+        ? 'Ask a question about the sources you indexed...'
+        : 'Ask a question...'}"></textarea>
       <button id="send">Send</button>
     </div>
-    <div class="verse">"Trust in the Lord with all your heart, and lean not on your own understanding." — Proverbs 3:5</div>
-    <div class="footer">Responses are AI-generated for reflection. Always compare with Scripture.</div>
+    <div class="footer">${index
+      ? 'Generated answers may be incomplete. Review the cited source passages.'
+      : 'No source corpus is indexed; answers use the model’s general knowledge and have no source citations.'}</div>
   </div>
 
   <script>
@@ -118,10 +141,10 @@ export async function startServer(port: number = 3000, loadDir: string = 'weight
       const thinking = addMsg('ai', '…');
 
       try {
-        const r = await fetch('/api/generate', {
+        const r = await fetch('/api/ask', {
           method: 'POST',
           headers: {'Content-Type':'application/json'},
-          body: JSON.stringify({ prompt, maxTokens: 140 })
+          body: JSON.stringify({ question: prompt, maxTokens: 384 })
         });
         const data = await r.json();
         if (!r.ok) throw new Error(data?.error || 'Request failed');
@@ -151,10 +174,17 @@ export async function startServer(port: number = 3000, loadDir: string = 'weight
     res.send(webUI);
   });
 
-  const server = app.listen(port, () => {
+  return app;
+}
+
+export async function startServer(port: number = 3000, indexPath = '.livingwords/index.json'): Promise<void> {
+  const index = await readIndexIfPresent(indexPath);
+  await ensureLocalModelServer();
+  const app = createApp(index);
+  const server = app.listen(port, '127.0.0.1', () => {
     console.log(`\n🙏 LivingWords LLM server running`);
     console.log(`   Web UI:   http://localhost:${port}/`);
-    console.log(`   API:      POST http://localhost:${port}/api/generate`);
+    console.log(`   API:      POST http://localhost:${port}/api/ask`);
     console.log(`   Health:   GET  http://localhost:${port}/api/health\n`);
     console.log('   Press Ctrl+C to stop.\n');
   });
@@ -162,7 +192,9 @@ export async function startServer(port: number = 3000, loadDir: string = 'weight
   // graceful
   const shutdown = () => {
     console.log('\nShutting down server...');
-    server.close(() => process.exit(0));
+    server.close(() => {
+      void stopLocalModelServer().finally(() => process.exit(0));
+    });
   };
   process.on('SIGINT', shutdown);
   process.on('SIGTERM', shutdown);
@@ -171,6 +203,6 @@ export async function startServer(port: number = 3000, loadDir: string = 'weight
 // Direct run support
 if (import.meta.url === `file://${process.argv[1]}` || process.argv[1]?.endsWith('serve.ts')) {
   const port = parseInt(process.argv[2] || '3000', 10);
-  const load = process.argv[3] || 'weights';
-  startServer(port, load).catch((e) => { console.error(e); process.exit(1); });
+  const indexPath = process.argv[3] || '.livingwords/index.json';
+  startServer(port, indexPath).catch((e) => { console.error(e); process.exit(1); });
 }

@@ -1,120 +1,71 @@
 # LivingWords LLM
 
-**Open-source God-centered LLM** aligned with Christian theological doctrine.
+LivingWords is a local-first retrieval-augmented assistant. **Gemma 4 E2B Instruct** is the pretrained general-purpose model; theological knowledge is supplied only through user-selected, indexed sources. The project does not train or fine-tune model weights.
 
-A lightweight decoder-only transformer (theoSmall config) designed to run on normal laptops. Training is performed with Python + PyTorch. Inference uses TypeScript with ONNX Runtime (onnxruntime-node, optional dep) as the only supported engine. The model is built to stay faithful to Scripture and produce warm, encouraging, biblically-aligned output for Christians and ministries.
+## Design
 
-## Core Vision
+- **Target device:** Apple M1 with 8 GB unified memory.
+- **Inference:** MLX-VLM on Apple Silicon, using a pinned 4-bit Gemma 4 E2B Instruct checkpoint and a local OpenAI-compatible server.
+- **Knowledge:** Optionally, local `.txt` and `.md` files selected by you and ingested into a compact BM25 index. The runtime does not load or select a default theology corpus.
+- **Grounding:** When an index exists, answers cite retrieved passages and report when the sources do not support a response. Without an index, chat and ask still work as general-purpose AI and explicitly label answers as ungrounded.
+- **Memory defaults:** 1,200-character chunks, 180-character approximate overlap, at most four retrieved passages, and at most 384 generated tokens (hard limit 512).
 
-Create a small, God-centered, open-source LLM that:
-- Runs comfortably on a standard laptop (e.g. MacBook Air M1/M2 with 8GB RAM)
-- Training uses Python + PyTorch; runtime is TypeScript with ONNX Runtime (onnxruntime-node, optional)
-- Remains lightweight
-- Produces scripture-flavored explanations, devotional thoughts, and prayer language
+BM25 is intentionally used instead of loading a second embedding model. It is local, deterministic, and inexpensive in memory; it may miss semantically related passages that share few words, so refine queries or provide focused source documents when needed.
 
-## Key Constraints (Non-Negotiable)
+## Quick start
 
-- Runs on standard consumer laptops (CPU-only)
-- Training: Python + PyTorch; Inference: TypeScript + ONNX Runtime
-- Model must stay lightweight (~500k parameters target)
-- Training and inference must be feasible on modest hardware
-
-## Target Architecture (v1)
-
-- Decoder-only transformer (nanoGPT-style)
-- ~990k parameters (`theoSmall` config) (actual count from the implementation)
-- Small-vocab subword tokenization (~1536 tokens) using tiktoken with frequency pruning
-- Context length: 256 tokens
-
-## Data Strategy
-
-**Pre-training**: Eight public-domain Bible translations combined into a single corpus (`data/pretrain/pretrain_bible.txt`):
-
-- AKJV – Authorized King James Version
-- ASV – American Standard Version
-- DBT – Darby Bible Translation
-- ERV – English Revised Version
-- KJV – King James Version
-- WBT – Webster’s Bible Translation
-- WEB – World English Bible
-- YLT – Young’s Literal Translation
-
-**Fine-tuning (Stage 2)**: High-quality verse + explanation pairs, cross references between Bible themes and books, and high-quality curated user Bible studies.
-
-## Desired Behavior (Hybrid System)
-
-The system is designed as a gated, reliable assistant:
-
-1. User asks a Bible or life question
-2. Vector/semantic search over the Bible corpus retrieves relevant verses
-3. Those verses + the question are passed to the 500k model
-4. The model generates a warm, simple, coherent explanation/paraphrase/devotional thought
-5. Output includes: Actual Bible verses + model-generated explanation
-
-**Graceful fallback**: If no relevant verses are found → “Sorry, I don’t have clear verses on that topic...”
-
-**Primary strength**: Scripture paraphrase, devotional writing, prayer generation, and verse explanation — not a general knowledge chatbot.
-
-## Success Criteria for v1
-
-- Produces fluent, scripture-flavored explanations when given verses
-- Training and inference run comfortably on a standard laptop
-- Web UI + CLI + API all functional
-- Theologically safe (no hallucinations on core doctrine thanks to search gate)
-
-## Features
-
-- Train small transformer models locally in Python (subword, CPU-friendly)
-- CLI chatbot (`lw chat`)
-- Server/API mode (`lw serve`) — REST API + served web chat UI
-- Full training pipeline with checkpoints and automatic save/load
-- `theoSmall` config targeting ~990k parameters with subword tokenization
-
-## Quick Start
+Install Node.js 18–22 dependencies:
 
 ```bash
-npm install livingwords-llm
+npm install
+npm run build
 ```
 
-### CLI Usage (runtime)
+On macOS Apple Silicon, `npm install` creates `.livingwords/python`, installs pinned `mlx-vlm==0.7.4`, and downloads the pinned 4-bit model snapshot into `.livingwords/models/`. The multi-gigabyte setup is idempotent and Hugging Face downloads resume if interrupted. No weights are committed or included in the npm package. First use of `lw chat`, `lw ask`, `lw generate`, or `lw serve` starts the project-local `mlx_vlm.server` when needed; a compatible server already using port 8080 is reused.
+
+On other platforms, npm dependencies install normally and the MLX setup is explicitly skipped. Use a local OpenAI-compatible server and set `LW_BASE_URL` to its `/v1` URL; the application does not start MLX on unsupported platforms. Apple Silicon requires Python 3.10+ and network access to install MLX-VLM and the model. If you intentionally want JS-only setup, use `LW_SKIP_MODEL_INSTALL=1 npm install`.
+
+The managed server binds only to `127.0.0.1:8080`; logs are written to `.livingwords/logs/model-server.log`. A conflicting model on that port produces an actionable error rather than being silently reused. `LW_BASE_URL` can select another local OpenAI-compatible endpoint. `.livingwords/` is gitignored.
+
+In another terminal, start chatting immediately without preparing a corpus:
 
 ```bash
-# Generate text (uses the bundled default model, or --load for custom)
-npx lw generate "In the beginning God created"
-
-# Interactive chatbot
 npx lw chat
+```
 
-# Start server + web chat UI
+Answers are clearly labeled as ungrounded until you add a source index. To enable retrieval and citations, index your own source documents:
+
+```bash
+npx lw ingest ./my-sources
+npx lw ask "What do these sources say about forgiveness?"
+npx lw chat
 npx lw serve --port 3000
 ```
 
-### Training (PyTorch)
+The index is written to `.livingwords/index.json` by default. `.livingwords/` is git-ignored. Only `.txt` and `.md` files are ingested; documents remain on disk and are not uploaded. To use a different index path, pass `--index`.
 
-Training (pretrain + SFT + DPO) with Python/PyTorch. `theoSmall` is the only supported configuration.
+`npx lw ask "..."` and `npx lw chat` use general pretrained knowledge and visibly label the response when no index exists; with an index, they use retrieval and citations. `npx lw generate "..."` always sends a general-purpose prompt without RAG and labels that output as ungrounded.
 
-```bash
-cd training
-pip install -r requirements.txt
-python pretrain.py --data ../data/pretrain/pretrain_bible.txt --max-iters 1500
-# or
-python sft.py --data data/sft_sample.jsonl
-python dpo.py --data data/prefs_sample.jsonl
-```
+## Commands
 
-Weights are automatically exported in the format expected by the TypeScript runtime (both legacy `weights.json` and modern `model.onnx`), so `lw chat` etc. continue to work unchanged.
+| Command | Purpose |
+|---|---|
+| `lw ingest <path>` | Build a local BM25 index from a file or directory |
+| `lw ask <question>` | General answer without an index; source-grounded answer when an index exists |
+| `lw chat` | Interactive chat, source-grounded when an index exists |
+| `lw serve` | Local web chat and HTTP API; reports whether an index is active |
+| `lw generate <prompt>` | General-purpose local Gemma generation without RAG |
 
-The runtime uses the ONNX backend (via `onnxruntime-node`, optional dep) when a `model.onnx` + `meta.json` is present (loaded via `.load()`). This is the currently supported inference path.
+The API request accepts `{ "question": "..." }`; it returns `{ "answer", "supported", "grounded", "sources" }`. With no index, it returns a general answer with `grounded: false`, `supported: false`, and no sources. `/api/health` exposes `ragAvailable`. `/api/generate` remains as a compatibility alias and follows the same optional-RAG behavior.
 
-TensorFlow.js is no longer supported. Old `weights.json` checkpoints are not loadable. Use the Python training tools in `training/` to produce `model.onnx` artifacts.
+## Training and adaptation scope
 
-See [training/README.md](training/README.md) for full details.
+From-scratch training, SFT, DPO, LoRA, QLoRA, and all weight-finetuning workflows are out of scope. Their scripts and helpers have been removed; no such workflow is exposed by the supported CLI, runtime, or package. RAG over explicitly supplied sources is the only theological knowledge/adaptation mechanism. Earlier sample corpora and ONNX weights remain in the source checkout as unreferenced historical artifacts; they are neither loaded nor included in the npm package.
 
 ## Documentation
 
-- **[docs/USAGE.md](docs/USAGE.md)** — Comprehensive usage guide
-- **[docs/CONCEPTS.md](docs/CONCEPTS.md)** — Deep dive into the architecture
-- **[docs/TRAINING_GUIDE.md](docs/TRAINING_GUIDE.md)** — Comprehensive guide for training the model
+- [Usage guide](docs/USAGE.md)
+- [Architecture and limitations](docs/CONCEPTS.md)
 
 ## License
 
