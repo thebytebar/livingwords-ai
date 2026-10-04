@@ -23,6 +23,8 @@ npm run dev
 
 `npm install` downloads the pinned desktop Gemma GGUF into `.livingwords/desktop-model/` on all platforms; the transfer resumes if interrupted and the file is SHA-256 verified. Electron packaging copies that model into the app resources, so the installed desktop app does not download weights at launch. The weights are not committed or included in the published npm package. `.livingwords/` is gitignored.
 
+For prebuilt macOS packages, including the first-launch Gatekeeper approval required by the current ad-hoc-signed builds, see the [desktop guide](docs/DESKTOP.md#open-an-ad-hoc-signed-build-on-another-mac).
+
 The Electron desktop app is the supported product. LivingWords does not expose a CLI, local web API, or browser-based chat entrypoint.
 
 ## Product details

@@ -16,7 +16,7 @@ LivingWords is local desktop AI with trusted, private workflows for serious user
 | Windows 10/11 | x64 | Bundled CPU `llama.cpp` |
 | Linux (Ubuntu 22.04 baseline) | x64 | Bundled CPU `llama.cpp` |
 
-The CI matrix builds and packages these targets. GPU acceleration beyond the macOS Metal build, additional CPU architectures, code signing/notarization, and older OS releases are not yet release commitments. The CPU-capable `llama.cpp` build is the compatibility baseline; performance and memory use depend on the host. Gemma 4 E2B is a multi-billion-parameter model, so verify that the device has several gigabytes of free memory and disk space before installation.
+The desktop workflow currently builds and packages macOS arm64 only; Windows and Linux builds are paused while the macOS deployment pipeline is stabilized. The app is ad-hoc signed to seal its bundled resources, but it is not Developer ID signed or notarized, so recipients must approve it in Gatekeeper on first launch. GPU acceleration beyond the macOS Metal build, additional CPU architectures, Developer ID distribution, and older OS releases are not yet release commitments. The CPU-capable `llama.cpp` build is the compatibility baseline; performance and memory use depend on the host. Gemma 4 E2B is a multi-billion-parameter model, so verify that the device has several gigabytes of free memory and disk space before installation.
 
 ## Model and runtime
 
@@ -73,9 +73,17 @@ npm run deploy
 
 The packaging script verifies the model's size and SHA-256 and fails if either the model or matching sidecar executable is missing. Electron Builder stores them under `resources/models/` and `resources/llama-server/<platform>/<architecture>/`, outside `app.asar`.
 
+### Open an ad-hoc-signed build on another Mac
+
+Share the macOS `.dmg` or installer `.zip` produced by Electron Builder, not an unpacked `LivingWords AI.app` directory. The desktop workflow publishes only these installer files. The recipient must use an Apple silicon Mac running macOS 14 or later.
+
+After downloading and extracting the GitHub Actions artifact, the recipient can open the DMG and drag `LivingWords AI.app` to Applications, or extract the installer ZIP and move the app to Applications. Because the app is ad-hoc signed and not notarized, macOS will not identify it as an Apple-verified developer. To approve this trusted app, Control-click it in Finder, choose **Open**, then confirm **Open** in the warning dialog. If macOS blocks the first launch without offering that button, try opening it once, then use **System Settings → Privacy & Security → Open Anyway**. Apple documents this process in [Safely open apps on your Mac](https://support.apple.com/en-us/102445).
+
+Only approve an app obtained from a source the recipient trusts. Ad-hoc signing seals the app contents so integrity can be checked; it does not establish the publisher's identity or satisfy Gatekeeper automatically. A message that the app is damaged, rather than an unidentified-developer warning, can indicate an invalid or altered bundle; use the packaged DMG/ZIP from the latest workflow run instead of a raw app folder or an older artifact. Launching without a Gatekeeper approval requires Developer ID signing and Apple notarization.
+
 ## Rebuild the llama.cpp sidecar
 
-The checked-in [desktop workflow](../.github/workflows/desktop.yml) downloads and verifies the model once, builds llama.cpp at the pinned commit `19e28a27702117d8f2eb16b825b9a308111f67d9`, and packages the model into the supported platform matrix on corresponding native runners. It runs for `desktop-v*` tags or by manual workflow dispatch. Workflow outputs are build artifacts; they are not automatically published as GitHub Releases.
+The checked-in [desktop workflow](../.github/workflows/desktop.yml) downloads and verifies the model once, builds llama.cpp at the pinned commit `19e28a27702117d8f2eb16b825b9a308111f67d9`, and packages macOS arm64 on a native runner. Windows and Linux builds are paused while the macOS deployment pipeline is stabilized. The workflow runs for `desktop-v*` tags or by manual dispatch. Workflow outputs are build artifacts; they are not automatically published as GitHub Releases.
 
 To build manually on macOS, install CMake and the Xcode command-line tools, then run the following from the repository root:
 
@@ -116,4 +124,4 @@ The server target requires `LLAMA_BUILD_TOOLS=ON`; examples and tests remain dis
 - Resized Sessions and Info panel widths are saved on this device. Terminal tabs and shell processes are in-memory only and are terminated when their tab or chat is deleted, the app window closes, or the app quits.
 - Model weights are bundled in the app resources; conversations are stored outside the installer. Legacy `index.json` files in app data are ignored and left untouched.
 
-Electron Builder release artifacts are not yet code-signed or notarized. Before distributing production binaries, configure platform signing/notarization, publish third-party notices, test clean installation and upgrades on each supported OS, and benchmark startup, model memory, and answer quality on representative hardware.
+Electron Builder signs the macOS app ad hoc so its resource seal can be verified, but release artifacts are not Developer ID signed or notarized. Before distributing production binaries, configure Developer ID signing/notarization, publish third-party notices, test clean installation and upgrades on each supported OS, and benchmark startup, model memory, and answer quality on representative hardware.

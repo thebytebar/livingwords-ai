@@ -89,6 +89,7 @@
       }
     ],
     "mac": {
+      "identity": "-",
       "category": "public.app-category.education",
       "icon": "desktop/assets/lw-macos-icon.png",
       "minimumSystemVersion": "14.0.0",

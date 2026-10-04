@@ -37,14 +37,6 @@ jobs:
             platform: mac
             arch: arm64
             metal: ON
-          - runner: windows-2022
-            platform: win
-            arch: x64
-            metal: OFF
-          - runner: ubuntu-22.04
-            platform: linux
-            arch: x64
-            metal: OFF
     env:
       INSTALL_RPATH: ${{ matrix.platform == 'mac' && '@executable_path' || '$ORIGIN' }}
     runs-on: ${{ matrix.runner }}
@@ -120,14 +112,6 @@ jobs:
             platform: mac
             arch: arm64
             target: mac
-          - runner: windows-2022
-            platform: win
-            arch: x64
-            target: win
-          - runner: ubuntu-22.04
-            platform: linux
-            arch: x64
-            target: linux
     runs-on: ${{ matrix.runner }}
     steps:
       - uses: actions/checkout@v4
@@ -135,6 +119,12 @@ jobs:
         with:
           name: llama-${{ matrix.platform }}-${{ matrix.arch }}
           path: sidecars/${{ matrix.platform }}/${{ matrix.arch }}
+      - name: Restore and smoke-test llama.cpp artifact
+        if: matrix.platform == 'mac'
+        run: |
+          # The GitHub artifact transport does not preserve executable permissions.
+          chmod +x sidecars/mac/arm64/llama-server sidecars/mac/arm64/*.dylib
+          sidecars/mac/arm64/llama-server --version
       - uses: actions/download-artifact@v4
         with:
           name: gemma-desktop-model
@@ -147,9 +137,17 @@ jobs:
       - run: node node_modules/electron/install.js
       - run: npm test
       - run: npm run deploy
+      - name: Verify macOS app resource seal
+        if: matrix.platform == 'mac'
+        run: |
+          app="release/mac-arm64/LivingWords AI.app"
+          test -s "$app/Contents/_CodeSignature/CodeResources"
+          codesign --verify --deep --strict --verbose=2 "$app"
       - uses: actions/upload-artifact@v4
         with:
           name: livingwords-${{ matrix.platform }}-${{ matrix.arch }}
-          path: release/*
+          path: |
+            release/*.dmg
+            release/*.zip
           if-no-files-found: error
           retention-days: 14
