@@ -11,7 +11,7 @@
     "pack": "npm run build && node scripts/check-sidecar.mjs && electron-builder --dir",
     "deploy": "npm run build && node scripts/check-sidecar.mjs && electron-builder",
     "test": "tsx --test src/core/assistant.test.ts && node --test desktop/panel-layout.test.mjs desktop/terminal-context.test.mjs desktop/terminal-readiness.test.mjs desktop/terminal-theme.test.mjs electron/chat-completion-stream.test.mjs electron/context-settings-store.test.mjs electron/context-window.test.mjs electron/conversation-store.test.mjs electron/inactivity-timeout.test.mjs electron/model-manager.test.mjs electron/request-queue.test.mjs electron/terminal-manager.test.mjs electron/trusted-renderer.test.mjs scripts/download-desktop-model.test.mjs",
-    "postinstall": "node scripts/install-desktop-model.mjs",
+    "postinstall": "node node_modules/electron/install.js && node scripts/install-desktop-model.mjs",
     "prepare": "npm run build"
   },
   "keywords": [
