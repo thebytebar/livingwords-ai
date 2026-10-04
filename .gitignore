@@ -3,6 +3,8 @@ node_modules
 dist/
 *.log
 .livingwords/
+/release/
+/sidecars/
 .venv/
 training/.venv/
 *.safetensors

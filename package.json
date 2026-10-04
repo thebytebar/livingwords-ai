@@ -1,21 +1,17 @@
 {
-  "name": "livingwords-llm",
+  "name": "livingwords-ai",
   "version": "0.1.0",
-  "description": "Local-first, source-grounded RAG using pretrained Gemma 4 E2B and an Apple Silicon-friendly MLX runtime.",
+  "description": "Local desktop AI with trusted, private workflows for serious users.",
+  "productName": "LivingWords AI",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
-  "bin": {
-    "lw": "dist/cli/index.js"
-  },
   "scripts": {
     "build": "node scripts/build.mjs",
-    "start": "node dist/cli/index.js",
-    "generate": "tsx src/cli/index.ts generate",
-    "chat": "tsx src/cli/index.ts chat",
-    "serve": "tsx src/cli/index.ts serve",
-    "dev": "tsx src/index.ts",
-    "test": "tsx --test src/core/rag.test.ts src/core/model-server.test.ts src/cli/serve.test.ts",
-    "postinstall": "node scripts/install-local-model.mjs",
+    "dev": "npm run build && electron-rebuild --force --which-module node-pty && node scripts/brand-electron-macos.mjs && node scripts/launch-electron.mjs electron/main.mjs",
+    "pack": "npm run build && node scripts/check-sidecar.mjs && electron-builder --dir",
+    "deploy": "npm run build && node scripts/check-sidecar.mjs && electron-builder",
+    "test": "tsx --test src/core/assistant.test.ts && node --test desktop/panel-layout.test.mjs desktop/terminal-context.test.mjs desktop/terminal-readiness.test.mjs desktop/terminal-theme.test.mjs electron/chat-completion-stream.test.mjs electron/context-settings-store.test.mjs electron/context-window.test.mjs electron/conversation-store.test.mjs electron/inactivity-timeout.test.mjs electron/model-manager.test.mjs electron/request-queue.test.mjs electron/terminal-manager.test.mjs electron/trusted-renderer.test.mjs scripts/download-desktop-model.test.mjs",
+    "postinstall": "node scripts/install-desktop-model.mjs",
     "prepare": "npm run build"
   },
   "keywords": [
@@ -23,12 +19,9 @@
     "transformer",
     "gpt",
     "gemma",
-    "mlx",
-    "rag",
-    "bible",
-    "christian",
-    "faith-tech",
-    "theology"
+    "local-ai",
+    "privacy",
+    "desktop-assistant"
   ],
   "author": "The Byte Bar Co. <dev@thebytebar.com>",
   "license": "MIT",
@@ -39,16 +32,85 @@
   "engines": {
     "node": ">=18 <23"
   },
-  "files": ["dist", "scripts/install-local-model.mjs"],
+  "files": [
+    "dist",
+    "electron/model-artifact.mjs",
+    "scripts/install-desktop-model.mjs",
+    "scripts/download-desktop-model.mjs"
+  ],
   "type": "module",
   "devDependencies": {
-    "@types/express": "^5.0.6",
+    "@electron/rebuild": "^4.2.0",
     "@types/node": "^25.9.3",
+    "electron": "^44.5.0",
+    "electron-builder": "^26.0.12",
     "tsx": "^4.22.4",
     "typescript": "^6.0.3"
   },
   "dependencies": {
-    "commander": "^15.0.0",
-    "express": "^5.2.1"
+    "@xterm/addon-fit": "^0.11.0",
+    "@xterm/xterm": "^6.0.0",
+    "dompurify": "^3.4.16",
+    "katex": "^0.19.0",
+    "marked": "^15.0.12",
+    "node-pty": "^1.1.0"
+  },
+  "build": {
+    "appId": "com.thebytebar.livingwords",
+    "productName": "LivingWords AI",
+    "asar": true,
+    "directories": {
+      "output": "release"
+    },
+    "files": [
+      "dist/**/*",
+      "electron/**/*",
+      "!electron/**/*.test.mjs",
+      "desktop/**/*",
+      "node_modules/@xterm/xterm/lib/xterm.mjs",
+      "node_modules/@xterm/addon-fit/lib/addon-fit.mjs",
+      "node_modules/marked/lib/marked.umd.js",
+      "node_modules/@xterm/xterm/css/xterm.css",
+      "node_modules/dompurify/dist/purify.js",
+      "node_modules/katex/dist/**/*",
+      "package.json"
+    ],
+    "extraMetadata": {
+      "main": "electron/main.mjs"
+    },
+    "extraResources": [
+      {
+        "from": "sidecars/${os}/${arch}",
+        "to": "llama-server/${os}/${arch}"
+      },
+      {
+        "from": ".livingwords/desktop-model/gemma-4-E2B-it-Q4_0.gguf",
+        "to": "models/gemma-4-E2B-it-Q4_0.gguf"
+      }
+    ],
+    "mac": {
+      "category": "public.app-category.education",
+      "icon": "desktop/assets/lw-macos-icon.png",
+      "minimumSystemVersion": "14.0.0",
+      "extendInfo": {
+        "CFBundleName": "LivingWords AI",
+        "CFBundleDisplayName": "LivingWords AI"
+      },
+      "target": [
+        "dmg",
+        "zip"
+      ]
+    },
+    "win": {
+      "target": [
+        "nsis"
+      ]
+    },
+    "linux": {
+      "category": "Education",
+      "target": [
+        "AppImage"
+      ]
+    }
   }
 }

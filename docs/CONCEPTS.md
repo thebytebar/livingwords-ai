@@ -1,35 +1,23 @@
 # Architecture and concepts
 
-LivingWords separates general language ability from theological knowledge:
+LivingWords is local desktop AI with trusted, private workflows for serious users: a private AI for writing, thinking, planning, and software tasks, built around a pretrained Gemma model:
 
-- **General-purpose language model:** pretrained Gemma 4 E2B Instruct, served locally. The supported target for Apple Silicon is MLX-VLM with a 4-bit checkpoint.
-- **Theological context:** user-provided `.txt` and `.md` documents, split into overlapping chunks and indexed locally.
-- **Retrieval:** a lightweight BM25 ranker selects up to four passages. This version deliberately avoids a second embedding model to keep memory use low on an 8 GB laptop.
-- **Grounded generation:** the question and retrieved excerpts are sent to the local model with source IDs. Instructions require source-limited answers, citations, and explicit uncertainty where excerpts do not support an answer.
-- **Fallback:** if there is no lexical evidence, generation is skipped and the system returns an explicit unsupported-answer response.
-- **No-index mode:** RAG is optional. When there is no index, chat and ask use the pretrained model as a general-purpose assistant, explicitly label the answer as ungrounded, and return no citations. An existing index with no relevant match does not use this fallback.
+- **Model:** Gemma 4 E2B Instruct provides language ability; the project does not pretrain or fine-tune model weights.
+- **Inference:** Electron desktop builds run the model through a bundled `llama.cpp` runtime on macOS, Windows, and Linux.
+- **Interfaces:** the desktop app is the supported product; there is no CLI or HTTP web interface.
+- **Workflows:** general-purpose chat with a Christian persona informed by historic Trinitarian Christianity and the Bible, plus a built-in terminal for software tasks. The Christian perspective is used when relevant to faith, theology, and ethics, not forced into unrelated answers. Assistant-proposed terminal commands require user approval before they run.
+- **Conversation context:** the Electron app stores chat sessions locally and supplies a bounded history from the selected conversation when generating follow-up answers.
+- **Privacy:** inference runs locally on the device, and conversation data is stored locally; the Electron renderer cannot access Node.js or the filesystem directly.
+- **Cost model:** there is no account, subscription, or per-prompt cloud fee. Users provide the hardware, storage, and power needed to run the model.
 
-```text
-User-owned .txt/.md sources
-        │
-        ├── chunk (about 1,200 chars; about 180-char overlap)
-        └── local BM25 index (.livingwords/index.json)
-                         │
-Question ── no index? ── general prompt ──┐
-            │                             │
-            └── BM25 top 4 ─ cited prompt ├── local Gemma 4 E2B
-                                          │
-                              ungrounded notice or citations
-```
-
-The index contains extracted text and relative filenames, not vector embeddings. Source IDs such as `[S1]` are request-local references mapped to a source file and chunk. Model output cannot be guaranteed to entail its citations; the source excerpts should be checked.
+The desktop client bundles its pinned GGUF model into each Electron build. `npm install` downloads and verifies the model into the ignored project model cache before the build injects it into app resources. The installed app does not download weights on first launch. See the [desktop build guide](DESKTOP.md) for artifact pins and release caveats.
 
 ## Memory profile
 
-The default prompt is limited to four passages (hard limit: eight), each approximately 1,200 characters; answer generation defaults to 384 tokens and has a hard 512-token cap. Chunking and retrieval run in Node.js without another model. Quantization and context settings are delegated to MLX-VLM, and actual memory use varies by runtime/model revision. Leave memory headroom for macOS and other applications.
+The desktop Settings window offers 8K, 16K, 32K, 64K, and 128K context windows, with 32K as the default. The response limit is approximately one quarter of the selected window, rounded down to the nearest 1,000 tokens and capped at 10,000. Larger contexts use more memory; changing the context restarts the local inference runtime and cancels any active response.
 
-## Scope
+## Scope and local data
 
-Gemma is used as a pretrained general-purpose model target. The project does not pretrain, SFT, DPO, LoRA/QLoRA, or finetune weights. The only supported theological knowledge/adaptation mechanism is retrieval from explicitly provided source material. Legacy sample data in the source checkout is not used by the runtime; no corpus or interpretation is endorsed.
+Chat prompts are processed by the bundled local model. Document import and external knowledge collections are not included. Existing `.livingwords/index.json` and desktop `index.json` files are ignored and left untouched. The selected context window and its corresponding response limit apply to each request.
 
-BM25 is inexpensive and explainable but lexical: semantically related text with no shared terms may not be found. If retrieval is weak, narrow the question or improve the source collection. General-purpose `lw generate` does not use retrieval and should not be treated as a source-grounded theological answer.
+The model is pretrained and is not fine-tuned by this project. It can make mistakes; verify answers when accuracy matters.

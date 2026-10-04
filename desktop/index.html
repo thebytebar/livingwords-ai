@@ -1,0 +1,436 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'self'; connect-src 'none'; img-src 'self' data:">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="dark light">
+  <title>LivingWords AI</title>
+  <link rel="stylesheet" href="./style.css">
+  <link rel="stylesheet" href="../node_modules/@xterm/xterm/css/xterm.css">
+  <link rel="stylesheet" href="../node_modules/katex/dist/katex.min.css">
+</head>
+<body>
+  <div id="splash-screen" class="splash-screen" role="img" aria-label="LivingWords AI">
+    <div class="splash-brand">
+      <img class="splash-logo-dark" src="./assets/lw-logo-mark-dark.png" alt="">
+      <img class="splash-logo-light" src="./assets/lw-logo-mark-light.png" alt="">
+      <span>LivingWords AI</span>
+    </div>
+  </div>
+  <div id="app-shell" class="app-shell info-collapsed" inert aria-hidden="true">
+    <nav class="icon-rail" aria-label="Primary navigation">
+      <a class="brand-mark" href="#" aria-label="LivingWords home">
+        <img class="brand-logo-dark" src="./assets/lw-logo-dark.png" alt="">
+        <img class="brand-logo-light" src="./assets/lw-logo-light.png" alt="">
+      </a>
+      <button id="chat-nav" class="rail-button active" type="button" aria-label="Chat" title="Chat" aria-current="page" aria-controls="session-list" aria-expanded="false">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 11.5a7.5 7.5 0 0 1-7.5 7.5H5l1.8-3.2A7.5 7.5 0 1 1 20 11.5Z"/></svg>
+      </button>
+      <div class="rail-spacer"></div>
+      <button id="settings-button" class="rail-button" type="button" aria-label="Settings" title="Settings">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 8.5a3.5 3.5 0 1 0 0 7 3.5 3.5 0 0 0 0-7Z"/><path d="m19.4 15 .1.1 1.1.9-1.2 2.1-1.4-.5a7.9 7.9 0 0 1-1.6.9l-.3 1.5h-2.4l-.3-1.5a7.9 7.9 0 0 1-1.7-.9l-1.3.5-1.2-2.1 1.1-.9a7.2 7.2 0 0 1 0-1.9l-1.1-.9 1.2-2.1 1.3.5a7.9 7.9 0 0 1 1.7-.9l.3-1.5h2.4l.3 1.5a7.9 7.9 0 0 1 1.6.9l1.4-.5 1.2 2.1-1.1.9a7.2 7.2 0 0 1-.1 1.8Z" transform="translate(-2 -1)"/></svg>
+      </button>
+    </nav>
+
+    <aside class="sessions-panel" aria-label="Chat sessions">
+      <div id="sessions-resizer" class="panel-resizer sessions-resizer" role="separator" tabindex="0"
+        aria-orientation="vertical" aria-label="Resize sessions panel" aria-valuemin="200" aria-valuemax="420" aria-valuenow="264"></div>
+      <header class="sessions-heading">
+        <h2>Sessions</h2>
+        <button id="new-chat" class="new-chat" type="button" aria-label="New conversation" title="New conversation">
+          <span aria-hidden="true">＋</span><span class="new-chat-label">New</span>
+        </button>
+      </header>
+      <label class="session-search">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="10.8" cy="10.8" r="6.5"/><path d="m16 16 4 4"/></svg>
+        <input id="session-search" type="search" placeholder="Search sessions…" aria-label="Search sessions">
+      </label>
+      <div id="session-list" class="session-list" role="group" aria-label="All conversations"></div>
+      <div class="sessions-footer">
+        <button id="assistant-info" class="assistant-card" data-state="starting" type="button"
+          aria-label="Assistant status and model license details" aria-live="polite" aria-atomic="true"
+          aria-haspopup="dialog" aria-controls="model-license-dialog">
+          <span class="status-dot"></span>
+          <div><strong id="assistant-status">Starting local AI</strong><small id="assistant-detail">Preparing to load the assistant</small></div>
+        </button>
+      </div>
+    </aside>
+
+    <main class="main-panel">
+      <header class="topbar">
+        <div class="conversation-heading">
+          <span class="eyebrow">PERSONAL KNOWLEDGE SPACE</span>
+          <h1 id="conversation-title">A thoughtful place to begin</h1>
+        </div>
+        <div class="chat-actions">
+          <button id="info-toggle" class="info-toggle" type="button" aria-label="Toggle tools panel" aria-controls="info-panel" aria-expanded="false" title="Show tools panel">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3.5" y="4" width="17" height="16" rx="2"/><path d="M14.5 4v16M9 9l3 3-3 3"/></svg>
+          </button>
+        </div>
+      </header>
+      <section id="welcome" class="welcome">
+        <img class="welcome-logo-dark" src="./assets/lw-logo-mark-dark.png" alt="">
+        <img class="welcome-logo-light" src="./assets/lw-logo-mark-light.png" alt="">
+        <h2>LivingWords AI</h2>
+      </section>
+      <section id="messages" class="messages" aria-live="polite"></section>
+      <div id="activity" class="activity" role="status" aria-live="polite" hidden><span id="activity-message"></span></div>
+      <form id="composer" class="composer">
+        <textarea id="question" rows="1" placeholder="Ask a question or explore an idea…" aria-label="Your question"></textarea>
+        <div class="composer-bottom">
+          <span>Enter to send · Shift+Enter for a new line</span>
+          <div class="composer-actions">
+            <button id="cancel" type="button" hidden>Cancel</button>
+            <div class="context-meter" id="context-meter">
+              <div id="context-meter-track" class="context-meter-ring" role="progressbar" tabindex="0"
+                aria-label="Estimated context window usage" aria-valuemin="0" aria-valuemax="32000" aria-valuenow="0"
+                aria-valuetext="Approximately 0 of 32,000 context tokens" aria-describedby="context-meter-tooltip">
+                <span class="context-meter-value" aria-hidden="true">0</span>
+              </div>
+              <div class="context-meter-tooltip" id="context-meter-tooltip" role="tooltip">
+                <div class="limit-meter-heading">
+                  <span>Context estimate</span>
+                  <span id="context-meter-value">~0 / 32,000 tokens</span>
+                </div>
+                <div class="limit-meter-track" aria-hidden="true">
+                  <span class="limit-meter-fill"></span>
+                </div>
+                <p>Input estimate; actual token use may vary.</p>
+              </div>
+            </div>
+            <button id="send" type="submit" aria-label="Send message">↑</button>
+          </div>
+        </div>
+      </form>
+    </main>
+
+    <aside id="info-panel" class="info-panel" aria-label="Tools panel" hidden>
+      <div id="info-resizer" class="panel-resizer info-resizer" role="separator" tabindex="0"
+        aria-orientation="vertical" aria-label="Resize info panel" aria-valuemin="220" aria-valuemax="580" aria-valuenow="300"></div>
+      <div class="info-toolbar">
+        <div class="info-add-wrap">
+          <button id="info-add-tab" class="info-add-tab" type="button" aria-label="Add tab" title="Add tab"
+            aria-haspopup="menu" aria-expanded="false">+</button>
+          <div id="info-add-menu" class="info-add-menu" role="menu" hidden>
+            <button type="button" role="menuitem" data-add-info-tab="terminal">Terminal</button>
+          </div>
+        </div>
+        <div id="info-tab-list" class="info-tab-list" role="tablist" aria-label="Tools"></div>
+        <button id="info-close" class="icon-button info-close" type="button" aria-label="Close tools panel" title="Close panel">×</button>
+      </div>
+      <div id="info-tab-panels" class="info-tab-panels"></div>
+    </aside>
+  </div>
+
+  <dialog id="settings-dialog" class="settings-dialog">
+    <div class="dialog-heading"><div><p class="eyebrow">PREFERENCES</p><h2>Settings</h2></div><button id="settings-close" class="icon-button" type="button" aria-label="Close settings">×</button></div>
+    <section class="settings-section" aria-labelledby="theme-heading">
+      <h3 id="theme-heading">Appearance</h3>
+      <p>Choose a theme for your workspace.</p>
+      <div class="theme-options" role="group" aria-label="Theme">
+        <button class="theme-option" type="button" data-theme-choice="dark" aria-pressed="true"><span class="theme-preview dark-preview"></span><span>Dark</span></button>
+        <button class="theme-option" type="button" data-theme-choice="light" aria-pressed="false"><span class="theme-preview light-preview"></span><span>Light</span></button>
+      </div>
+    </section>
+    <section class="settings-section" aria-labelledby="context-window-heading">
+      <h3 id="context-window-heading">Context window</h3>
+      <p id="context-window-description">Larger windows let the model consider more text and use more memory. Changing this setting restarts the local model and cancels any response in progress. Output limits scale with the window up to 10,000 tokens.</p>
+      <label class="context-window-label" for="context-window-select">Window size</label>
+      <select id="context-window-select" aria-describedby="context-window-description" disabled>
+        <option value="8192">8K</option>
+        <option value="16384">16K</option>
+        <option value="32768" selected>32K (Recommended)</option>
+        <option value="65536">64K</option>
+        <option value="131072">128K</option>
+      </select>
+      <p id="context-window-response-limit" class="context-window-response-limit">Response limit: 8,000 tokens</p>
+    </section>
+    <p class="privacy-note">Your conversations stay on this device. No account, subscription, or per-prompt cloud fees.</p>
+  </dialog>
+
+  <dialog id="about-dialog" class="about-dialog" aria-labelledby="about-title">
+    <div class="dialog-heading">
+      <div><p class="eyebrow">ABOUT LIVINGWORDS AI</p><h2 id="about-title">Local desktop AI for serious work.</h2></div>
+      <button id="about-close" class="icon-button" type="button" aria-label="Close about LivingWords AI">×</button>
+    </div>
+    <div class="about-content">
+      <p>LivingWords AI is private desktop AI for serious users who need trusted workflows for writing, thinking, planning, and software tasks. Use it without an account, subscription, or per-prompt cloud fees.</p>
+      <section class="settings-section" aria-labelledby="about-privacy-heading">
+        <h3 id="about-privacy-heading">Private by design</h3>
+        <p>Responses are generated on this device and conversations are stored locally. Your prompts are not sent to a cloud AI service. You provide the hardware, storage, and power to run the model.</p>
+      </section>
+      <section class="settings-section" aria-labelledby="about-model-heading">
+        <h3 id="about-model-heading">Powered by an open model</h3>
+        <p>LivingWords AI includes Gemma 4 E2B Instruct, running locally. Model details and license information are available separately. Answers can be wrong and should be checked when accuracy matters.</p>
+        <button id="about-model-details" class="about-details-button" type="button">View model details</button>
+      </section>
+      <p id="about-version" class="about-version"></p>
+      <p class="about-license">LivingWords AI is open source under the MIT License.</p>
+    </div>
+  </dialog>
+
+  <dialog id="model-license-dialog" class="model-license-dialog" aria-labelledby="model-license-title">
+    <div class="dialog-heading">
+      <div><p class="eyebrow">MODEL INFORMATION</p><h2 id="model-license-title">Gemma 4 E2B Instruct</h2></div>
+      <button id="model-license-close" class="icon-button" type="button" aria-label="Close model information">×</button>
+    </div>
+    <div class="model-license-content">
+      <section class="settings-section" aria-labelledby="model-license-summary">
+        <h3 id="model-license-summary">Model and license</h3>
+        <p>This app bundles <strong>Gemma 4 E2B Instruct Q4_0</strong>, a quantized GGUF conversion of Google's <code>google/gemma-4-E2B-it</code>, distributed by <code>ggml-org</code>. The model is provided under the <strong>Apache License, Version 2.0</strong>. The model weights are separate from LivingWords, which is licensed under MIT.</p>
+        <p>Bundled artifact: <code>gemma-4-E2B-it-Q4_0.gguf</code><br>
+          Source: <a href="https://huggingface.co/ggml-org/gemma-4-E2B-it-GGUF/tree/b4243c156154b6dca9324415f8c7ccc098b4aed1" target="_blank" rel="noopener noreferrer">ggml-org/gemma-4-E2B-it-GGUF</a> at revision <code>b4243c156154b6dca9324415f8c7ccc098b4aed1</code>.<br>
+          Base model: <a href="https://huggingface.co/google/gemma-4-E2B-it" target="_blank" rel="noopener noreferrer">google/gemma-4-E2B-it</a>.</p>
+      </section>
+      <section class="settings-section" aria-labelledby="model-license-obligations">
+        <h3 id="model-license-obligations">Apache 2.0 notices</h3>
+        <p>If you redistribute the model or a derivative, provide a copy of the license, retain applicable upstream copyright, patent, trademark, and attribution notices, identify modified files, and include any applicable upstream NOTICE attributions. The license does not grant trademark rights. The complete license terms follow.</p>
+      </section>
+      <details class="license-terms">
+        <summary>Read the full Apache License, Version 2.0</summary>
+        <pre>Apache License
+Version 2.0, January 2004
+http://www.apache.org/licenses/
+
+TERMS AND CONDITIONS FOR USE, REPRODUCTION, AND DISTRIBUTION
+
+1. Definitions.
+
+"License" shall mean the terms and conditions for use, reproduction,
+and distribution as defined by Sections 1 through 9 of this document.
+
+"Licensor" shall mean the copyright owner or entity authorized by
+the copyright owner that is granting the License.
+
+"Legal Entity" shall mean the union of the acting entity and all
+other entities that control, are controlled by, or are under common
+control with that entity. For the purposes of this definition,
+"control" means (i) the power, direct or indirect, to cause the
+direction or management of such entity, whether by contract or
+otherwise, or (ii) ownership of fifty percent (50%) or more of the
+outstanding shares, or (iii) beneficial ownership of such entity.
+
+"You" (or "Your") shall mean an individual or Legal Entity
+exercising permissions granted by this License.
+
+"Source" form shall mean the preferred form for making modifications,
+including but not limited to software source code, documentation
+source, and configuration files.
+
+"Object" form shall mean any form resulting from mechanical
+transformation or translation of a Source form, including but
+not limited to compiled object code, generated documentation,
+and conversions to other media types.
+
+"Work" shall mean the work of authorship, whether in Source or
+Object form, made available under the License, as indicated by a
+copyright notice that is included in or attached to the work
+(an example is provided in the Appendix below).
+
+"Derivative Works" shall mean any work of authorship, whether in Source or Object
+form, that is based on (or derived from) the Work and for which the
+editorial revisions, annotations, elaborations, or other modifications
+represent, as a whole, an original work of authorship. For the purposes
+of this License, Derivative Works shall not include works that remain
+separable from, or merely link (or bind by name) to the interfaces of,
+the Work and Derivative Works thereof.
+
+"Contribution" shall mean any work of authorship, including
+the original version of the Work and any modifications or additions
+to that Work or Derivative Works thereof, that is intentionally
+submitted to Licensor for inclusion in the Work by the copyright owner
+or by an individual or Legal Entity authorized to submit on behalf of
+the copyright owner. For the purposes of this definition,
+"submitted" means any form of electronic, verbal, or written
+communication sent to the Licensor or its representatives, including
+but not limited to communication on electronic mailing lists,
+source code control systems, and issue tracking systems that are
+managed by, or on behalf of, the Licensor for the purpose of discussing
+and improving the Work, but excluding communication that is conspicuously
+marked or otherwise designated in writing by the copyright owner as
+"Not a Contribution."
+
+"Contributor" shall mean Licensor and any individual or Legal Entity
+on behalf of whom a Contribution has been received by Licensor and
+subsequently incorporated within the Work.
+
+2. Grant of Copyright License. Subject to the terms and conditions of
+this License, each Contributor hereby grants to You a perpetual,
+worldwide, non-exclusive, no-charge, royalty-free, irrevocable
+copyright license to reproduce, prepare Derivative Works of,
+publicly display, publicly perform, sublicense, and distribute the
+Work and such Derivative Works in Source or Object form.
+
+3. Grant of Patent License. Subject to the terms and conditions of
+this License, each Contributor hereby grants to You a perpetual,
+worldwide, non-exclusive, no-charge, royalty-free, irrevocable
+(except as stated in this section) patent license to make, have made,
+use, offer to sell, sell, import, and otherwise transfer the Work,
+where such license applies only to those patent claims licensable
+by such Contributor that are necessarily infringed by their
+Contribution(s) alone or by combination of their Contribution(s)
+with the Work to which such Contribution(s) was submitted. If You
+institute patent litigation against any entity (including a
+cross-claim or counterclaim in a lawsuit) alleging that the Work
+or a Contribution incorporated within the Work constitutes direct
+or contributory patent infringement, then any patent licenses
+granted to You under this License for that Work shall terminate
+as of the date such litigation is filed.
+
+4. Redistribution. You may reproduce and distribute copies of the
+Work or Derivative Works thereof in any medium, with or without
+modifications, and in Source or Object form, provided that You
+meet the following conditions:
+
+(a) You must give any other recipients of the Work or
+    Derivative Works a copy of this License; and
+
+(b) You must cause any modified files to carry prominent
+    notices stating that You changed the files; and
+
+(c) You must retain, in the Source form of any Derivative Works
+    that You distribute, all copyright, patent, trademark, and
+    attribution notices from the Source form of the Work,
+    excluding those notices that do not pertain to any part of
+    the Derivative Works; and
+
+(d) If the Work includes a "NOTICE" text file as part of its
+    distribution, then any Derivative Works that You distribute must
+    include a readable copy of the attribution notices contained
+    within such NOTICE file, excluding those notices that do not
+    pertain to any part of the Derivative Works, in at least one
+    of the following places: within a NOTICE text file distributed
+    as part of the Derivative Works; within the Source form or
+    documentation, if provided along with the Derivative Works; or,
+    within a display generated by the Derivative Works, if and
+    wherever such third-party notices normally appear. The contents
+    of the NOTICE file are for informational purposes only and
+    do not modify the License. You may add Your own attribution
+    notices within Derivative Works that You distribute, alongside
+    or as an addendum to the NOTICE text from the Work, provided
+    that such additional attribution notices cannot be construed
+    as modifying the License.
+
+You may add Your own copyright statement to Your modifications
+and may provide additional or different license terms and conditions
+for use, reproduction, or distribution of Your modifications, or
+for any such Derivative Works as a whole, provided Your use,
+reproduction, and distribution of the Work otherwise complies with
+the conditions stated in this License.
+
+5. Submission of Contributions. Unless You explicitly state
+otherwise, any Contribution intentionally submitted for inclusion
+in the Work by You to the Licensor shall be under the terms and
+conditions of this License, without any additional terms or
+conditions. Notwithstanding the above, nothing herein shall
+supersede or modify the terms of any separate license agreement
+you may have executed with Licensor regarding such Contributions.
+
+6. Trademarks. This License does not grant permission to use the
+trade names, trademarks, service marks, or product names of the
+Licensor, except as required for reasonable and customary use in
+describing the origin of the Work and reproducing the content of
+the NOTICE file.
+
+7. Disclaimer of Warranty. Unless required by applicable law or
+agreed to in writing, Licensor provides the Work (and each
+Contributor provides its Contributions) on an "AS IS" BASIS,
+WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or
+implied, including, without limitation, any warranties or conditions
+of TITLE, NON-INFRINGEMENT, MERCHANTABILITY, or FITNESS FOR A
+PARTICULAR PURPOSE. You are solely responsible for determining
+the appropriateness of using or redistributing the Work and assume
+any risks associated with Your exercise of permissions under this
+License.
+
+8. Limitation of Liability. In no event and under no legal theory,
+whether in tort (including negligence), contract, or otherwise,
+unless required by applicable law (such as deliberate and grossly
+negligent acts) or agreed to in writing, shall any Contributor be
+liable to You for damages, including any direct, indirect, special,
+incidental, or consequential damages of any character arising as
+a result of this License or out of the use or inability to use
+the Work (including but not limited to damages for loss of goodwill,
+work stoppage, computer failure or malfunction, or any and all
+other commercial damages or losses), even if such Contributor
+has been advised of the possibility of such damages.
+
+9. Accepting Warranty or Additional Liability. While redistributing
+the Work or Derivative Works thereof, You may choose to offer,
+and charge a fee for, acceptance of support, warranty, indemnity,
+or other liability obligations and/or rights consistent with this
+License. However, in accepting such obligations, You may act only
+on Your own behalf and on Your sole responsibility, not on behalf
+of any other Contributor, and only if You agree to indemnify,
+defend, and hold each Contributor harmless for any liability
+incurred by, or claims asserted against, such Contributor by reason
+of your accepting any such warranty or additional liability.
+
+END OF TERMS AND CONDITIONS
+
+APPENDIX: How to apply the Apache License to your work.
+
+To apply the Apache License to your work, attach the following
+boilerplate notice, with the fields enclosed by brackets "[]"
+replaced with your own identifying information. (Don't include
+the brackets!) The text should be enclosed in the appropriate
+comment syntax for the file format. We also recommend that a file
+or class name and description of purpose be included on the same
+"printed page" as the copyright notice for easier identification
+within third-party archives.
+
+Copyright [yyyy] [name of copyright owner]
+
+Licensed under the Apache License, Version 2.0 (the "License");
+you may not use this file except in compliance with the License.
+You may obtain a copy of the License at
+
+    http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing, software
+distributed under the License is distributed on an "AS IS" BASIS,
+WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or
+implied. See the License for the specific language governing
+permissions and limitations under the License.</pre>
+      </details>
+      <p class="model-license-source">Official terms: <a href="https://ai.google.dev/gemma/apache_2" target="_blank" rel="noopener noreferrer">Google's Gemma license page</a> · <a href="https://www.apache.org/licenses/LICENSE-2.0" target="_blank" rel="noopener noreferrer">Apache License 2.0</a>. Review the model card and source repository for model-specific notices before redistribution.</p>
+    </div>
+  </dialog>
+
+  <dialog id="delete-dialog" class="confirm-dialog" aria-labelledby="delete-dialog-title">
+    <p class="eyebrow">DELETE CONVERSATION</p>
+    <h2 id="delete-dialog-title">Permanently delete this conversation?</h2>
+    <p id="delete-dialog-copy">This conversation and its messages will be permanently deleted.</p>
+    <form method="dialog" class="dialog-actions">
+      <button class="quiet-button" value="cancel">Cancel</button>
+      <button id="delete-confirm" class="danger-button" value="delete">Delete conversation</button>
+    </form>
+  </dialog>
+
+  <dialog id="terminal-command-dialog" class="confirm-dialog" aria-labelledby="terminal-command-title">
+    <p class="eyebrow">TERMINAL COMMAND</p>
+    <h2 id="terminal-command-title">Allow the assistant to run this command?</h2>
+    <p>The command will run with your account permissions in this conversation's terminal.</p>
+    <pre id="terminal-command-text" class="terminal-command-preview"></pre>
+    <form method="dialog" class="dialog-actions">
+      <button class="quiet-button" value="decline">Don't run</button>
+      <button class="primary-button" value="approve">Run command</button>
+    </form>
+  </dialog>
+
+  <dialog id="setup-dialog">
+    <div class="setup-icon">✳</div>
+    <p class="eyebrow">LOCAL ASSISTANT</p>
+    <h2>Your private AI workbench is ready.</h2>
+    <p>The model runs on this device, and your conversations stay local. No account, subscription, or per-prompt cloud fees. Performance depends on your computer.</p>
+    <div class="setup-details"><span>◉</span><div><strong>Local AI for serious work</strong><small>Private by default · no account required</small></div></div>
+    <p id="setup-runtime-warning" class="error-message" hidden>The local llama.cpp runtime is not available. Development: install llama.cpp (macOS: <code>brew install llama.cpp</code>) or set <code>LW_LLAMA_SERVER</code> to its executable path. Packaged desktop builds include the runtime.</p>
+    <p id="setup-assistant-warning" class="error-message" hidden>Assistant resources are missing from this desktop build. Run <code>npm install</code>, then rebuild the app.</p>
+    <div class="dialog-actions"><button id="setup-later" class="quiet-button">Close</button><button id="setup-start" class="primary-button">Understood</button></div>
+  </dialog>
+  <script src="../node_modules/marked/lib/marked.umd.js"></script>
+  <script src="../node_modules/dompurify/dist/purify.js"></script>
+  <script type="module" src="./renderer.js"></script>
+</body>
+</html>

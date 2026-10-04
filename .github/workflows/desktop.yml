@@ -1,0 +1,155 @@
+name: Desktop builds
+
+on:
+  workflow_dispatch:
+  push:
+    tags:
+      - 'desktop-v*'
+
+permissions:
+  contents: read
+
+jobs:
+  model:
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci --ignore-scripts
+      - run: node scripts/install-desktop-model.mjs
+      - uses: actions/upload-artifact@v4
+        with:
+          name: gemma-desktop-model
+          path: .livingwords/desktop-model/gemma-4-E2B-it-Q4_0.gguf
+          compression-level: 0
+          if-no-files-found: error
+          retention-days: 7
+
+  sidecar:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: macos-14-arm64
+            platform: mac
+            arch: arm64
+            metal: ON
+          - runner: windows-2022
+            platform: win
+            arch: x64
+            metal: OFF
+          - runner: ubuntu-22.04
+            platform: linux
+            arch: x64
+            metal: OFF
+    env:
+      INSTALL_RPATH: ${{ matrix.platform == 'mac' && '@executable_path' || '$ORIGIN' }}
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/checkout@v4
+        with:
+          repository: ggml-org/llama.cpp
+          ref: 19e28a27702117d8f2eb16b825b9a308111f67d9
+          path: llama.cpp
+      - name: Configure llama.cpp
+        shell: bash
+        run: |
+          cmake -S llama.cpp -B llama.cpp/build \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_BUILD_WITH_INSTALL_RPATH=ON \
+            -DBUILD_SHARED_LIBS=ON \
+            -DLLAMA_BUILD_SERVER=ON \
+            -DLLAMA_BUILD_TESTS=OFF \
+            -DLLAMA_BUILD_EXAMPLES=OFF \
+            -DLLAMA_BUILD_TOOLS=ON \
+            -DLLAMA_USE_PREBUILT_UI=OFF \
+            -DLLAMA_OPENSSL=OFF \
+            -DGGML_NATIVE=OFF \
+            "-DCMAKE_INSTALL_RPATH=$INSTALL_RPATH" \
+            -DGGML_METAL=${{ matrix.metal }}
+      - name: Build llama-server
+        run: cmake --build llama.cpp/build --config Release --target llama-server --parallel 2
+      - name: Collect platform sidecar
+        shell: bash
+        run: |
+          mkdir -p "sidecars/${{ matrix.platform }}/${{ matrix.arch }}"
+          runtime_dir="sidecars/${{ matrix.platform }}/${{ matrix.arch }}"
+          if [[ "${{ matrix.platform }}" == "win" ]]; then
+            server_path="$(find llama.cpp/build -type f -name llama-server.exe -print -quit)"
+            test -n "$server_path"
+            cp "$server_path" "$runtime_dir/"
+            find llama.cpp/build -type f -name '*.dll' -exec cp {} "$runtime_dir/" \;
+          else
+            server_path="$(find llama.cpp/build -type f -name llama-server -print -quit)"
+            test -n "$server_path"
+            cp "$server_path" "$runtime_dir/"
+            case "${{ matrix.platform }}" in
+              mac)
+                find llama.cpp/build -name '*.dylib' -exec cp -P {} "$runtime_dir/" \;
+                "$runtime_dir/llama-server" --version
+                ;;
+              linux)
+                find llama.cpp/build -name '*.so*' -exec cp -P {} "$runtime_dir/" \;
+                ldd "$runtime_dir/llama-server"
+                ! ldd "$runtime_dir/llama-server" | grep -q 'not found'
+                "$runtime_dir/llama-server" --version
+                ;;
+            esac
+          fi
+      - name: Smoke-test Windows runtime
+        if: matrix.platform == 'win'
+        run: sidecars/${{ matrix.platform }}/${{ matrix.arch }}/llama-server.exe --version
+      - uses: actions/upload-artifact@v4
+        with:
+          name: llama-${{ matrix.platform }}-${{ matrix.arch }}
+          path: sidecars/${{ matrix.platform }}/${{ matrix.arch }}
+          if-no-files-found: error
+          retention-days: 7
+
+  package:
+    needs: [model, sidecar]
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: macos-14-arm64
+            platform: mac
+            arch: arm64
+            target: mac
+          - runner: windows-2022
+            platform: win
+            arch: x64
+            target: win
+          - runner: ubuntu-22.04
+            platform: linux
+            arch: x64
+            target: linux
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: llama-${{ matrix.platform }}-${{ matrix.arch }}
+          path: sidecars/${{ matrix.platform }}/${{ matrix.arch }}
+      - uses: actions/download-artifact@v4
+        with:
+          name: gemma-desktop-model
+          path: .livingwords/desktop-model
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci --ignore-scripts
+      - run: node node_modules/electron/install.js
+      - run: npm test
+      - run: npm run deploy
+      - uses: actions/upload-artifact@v4
+        with:
+          name: livingwords-${{ matrix.platform }}-${{ matrix.arch }}
+          path: release/*
+          if-no-files-found: error
+          retention-days: 14
