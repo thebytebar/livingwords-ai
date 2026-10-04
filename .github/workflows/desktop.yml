@@ -135,6 +135,9 @@ jobs:
         with:
           name: llama-${{ matrix.platform }}-${{ matrix.arch }}
           path: sidecars/${{ matrix.platform }}/${{ matrix.arch }}
+      - name: Make Unix sidecar executable
+        if: matrix.platform != 'win'
+        run: chmod +x "sidecars/${{ matrix.platform }}/${{ matrix.arch }}/llama-server"
       - uses: actions/download-artifact@v4
         with:
           name: gemma-desktop-model
