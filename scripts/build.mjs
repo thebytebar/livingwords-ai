@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 
-import { chmod, rm } from 'node:fs/promises';
+import { rm } from 'node:fs/promises';
 import { spawnSync } from 'node:child_process';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -16,6 +16,4 @@ if (result.error) {
   process.exitCode = 1;
 } else if (result.status !== 0) {
   process.exitCode = result.status ?? 1;
-} else if (process.platform !== 'win32') {
-  await chmod(join(dist, 'cli', 'index.js'), 0o755);
 }
