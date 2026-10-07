@@ -39,7 +39,8 @@
       <header class="sessions-heading">
         <h2>Sessions</h2>
         <button id="new-chat" class="new-chat" type="button" aria-label="New conversation" title="New conversation">
-          <span aria-hidden="true">＋</span><span class="new-chat-label">New</span>
+          <svg class="new-chat-plus" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg>
+          <span class="new-chat-label">New</span>
         </button>
       </header>
       <label class="session-search">
@@ -64,7 +65,7 @@
           <h1 id="conversation-title">A thoughtful place to begin</h1>
         </div>
         <div class="chat-actions">
-          <button id="info-toggle" class="info-toggle" type="button" aria-label="Toggle tools panel" aria-controls="info-panel" aria-expanded="false" title="Show tools panel">
+          <button id="info-toggle" class="info-toggle" type="button" aria-label="Toggle tools and documents panel" aria-controls="info-panel" aria-expanded="false" title="Show tools and documents">
             <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3.5" y="4" width="17" height="16" rx="2"/><path d="M14.5 4v16M9 9l3 3-3 3"/></svg>
           </button>
         </div>
@@ -75,11 +76,29 @@
         <h2>LivingWords AI</h2>
       </section>
       <section id="messages" class="messages" aria-live="polite"></section>
-      <div id="activity" class="activity" role="status" aria-live="polite" hidden><span id="activity-message"></span></div>
+      <div id="activity" class="activity" role="status" aria-live="polite" hidden>
+        <span id="activity-message"></span>
+        <button id="activity-clear" class="activity-clear" type="button" hidden>Clear</button>
+      </div>
       <form id="composer" class="composer">
         <textarea id="question" rows="1" placeholder="Ask a question or explore an idea…" aria-label="Your question"></textarea>
         <div class="composer-bottom">
-          <span>Enter to send · Shift+Enter for a new line</span>
+          <div class="composer-tools">
+            <div class="document-add-wrap composer-document-add">
+              <button id="add-document-source" class="composer-add-source document-add-button" type="button"
+                aria-label="Add files or folders to this conversation" title="Add files or folders"
+                aria-haspopup="menu" aria-expanded="false" aria-controls="composer-document-menu">
+                <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg>
+              </button>
+              <div id="composer-document-menu" class="document-add-menu composer-add-menu" role="menu" hidden>
+                <button type="button" role="menuitem" data-composer-document-add="files">Add files</button>
+                <button type="button" role="menuitem" data-composer-document-add="folder">Add folder</button>
+              </div>
+            </div>
+            <div id="selected-document-sources" class="selected-document-sources" role="status" aria-label="Attached document count" hidden>
+              <div id="selected-document-chips" class="selected-document-chips"></div>
+            </div>
+          </div>
           <div class="composer-actions">
             <button id="cancel" type="button" hidden>Cancel</button>
             <div class="context-meter" id="context-meter">
@@ -105,14 +124,17 @@
       </form>
     </main>
 
-    <aside id="info-panel" class="info-panel" aria-label="Tools panel" hidden>
+    <aside id="info-panel" class="info-panel" aria-label="Tools and documents panel" hidden>
       <div id="info-resizer" class="panel-resizer info-resizer" role="separator" tabindex="0"
         aria-orientation="vertical" aria-label="Resize info panel" aria-valuemin="220" aria-valuemax="580" aria-valuenow="300"></div>
       <div class="info-toolbar">
         <div class="info-add-wrap">
           <button id="info-add-tab" class="info-add-tab" type="button" aria-label="Add tab" title="Add tab"
-            aria-haspopup="menu" aria-expanded="false">+</button>
+            aria-haspopup="menu" aria-expanded="false">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg>
+          </button>
           <div id="info-add-menu" class="info-add-menu" role="menu" hidden>
+            <button type="button" role="menuitem" data-add-info-tab="documents">Documents</button>
             <button type="button" role="menuitem" data-add-info-tab="terminal">Terminal</button>
           </div>
         </div>
@@ -122,6 +144,25 @@
       <div id="info-tab-panels" class="info-tab-panels"></div>
     </aside>
   </div>
+
+  <dialog id="document-viewer-dialog" class="document-viewer-dialog" aria-labelledby="document-viewer-title">
+    <div class="dialog-heading">
+      <div><p class="eyebrow">ATTACHED DOCUMENT</p><h2 id="document-viewer-title">Document</h2></div>
+      <button id="document-viewer-close" class="icon-button" type="button" aria-label="Close document viewer">×</button>
+    </div>
+    <p id="document-viewer-meta" class="document-viewer-meta"></p>
+    <pre id="document-viewer-content" class="document-viewer-content"></pre>
+  </dialog>
+
+  <dialog id="remove-document-dialog" class="confirm-dialog" aria-labelledby="remove-document-title">
+    <p class="eyebrow">REMOVE DOCUMENT</p>
+    <h2 id="remove-document-title">Remove this reference?</h2>
+    <p>Remove <strong id="remove-document-name"></strong> and its local index from this conversation? The original file or folder will not be changed or deleted.</p>
+    <form method="dialog" class="dialog-actions">
+      <button class="quiet-button" value="cancel">Keep attached</button>
+      <button id="remove-document-confirm" class="danger-button" value="remove">Remove reference</button>
+    </form>
+  </dialog>
 
   <dialog id="settings-dialog" class="settings-dialog">
     <div class="dialog-heading"><div><p class="eyebrow">PREFERENCES</p><h2>Settings</h2></div><button id="settings-close" class="icon-button" type="button" aria-label="Close settings">×</button></div>
@@ -416,6 +457,18 @@ permissions and limitations under the License.</pre>
     <form method="dialog" class="dialog-actions">
       <button class="quiet-button" value="decline">Don't run</button>
       <button class="primary-button" value="approve">Run command</button>
+    </form>
+  </dialog>
+
+  <dialog id="document-edit-dialog" class="confirm-dialog document-edit-dialog" aria-labelledby="document-edit-title">
+    <p class="eyebrow">DOCUMENT EDIT</p>
+    <h2 id="document-edit-title">Review proposed changes</h2>
+    <p id="document-edit-copy"></p>
+    <p id="document-edit-warning" class="document-edit-warning" hidden></p>
+    <pre id="document-edit-preview" class="document-edit-preview" tabindex="0"></pre>
+    <form method="dialog" class="dialog-actions">
+      <button class="quiet-button" value="decline">Don't apply</button>
+      <button id="document-edit-approve" class="primary-button" value="approve">Apply changes</button>
     </form>
   </dialog>
 

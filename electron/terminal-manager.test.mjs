@@ -113,11 +113,13 @@ test('terminal manager closes only the requested session and reports process exi
   const { manager, children, exits } = fakeTerminalManager();
   manager.create({ terminalId: TERMINAL_A, sessionId: SESSION_A, cols: 80, rows: 24 });
   manager.create({ terminalId: TERMINAL_B, sessionId: SESSION_B, cols: 100, rows: 30 });
+  assert.equal(manager.activeCount, 2);
   const first = children.get(80);
   const second = children.get(100);
 
   assert.equal(manager.close(TERMINAL_A, SESSION_B), false);
   assert.equal(manager.close(TERMINAL_A, SESSION_A), true);
+  assert.equal(manager.activeCount, 1);
   assert.equal(first.killed, true);
   assert.equal(second.killed, false);
   second.exitListener({ exitCode: 0 });
@@ -134,4 +136,5 @@ test('terminal manager closes every process when its session or the app closes',
   assert.equal(children.get(100).killed, false);
   manager.closeAll();
   assert.equal(children.get(100).killed, true);
+  assert.equal(manager.activeCount, 0);
 });

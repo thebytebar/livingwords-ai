@@ -7,6 +7,13 @@ contextBridge.exposeInMainWorld('livingWords', Object.freeze({
     ipcRenderer.invoke('livingwords:context-window:set', contextWindowTokens),
   readClipboardText: () => ipcRenderer.invoke('livingwords:clipboard:read-text'),
   writeClipboardText: (text) => ipcRenderer.invoke('livingwords:clipboard:write-text', text),
+  listDocuments: (sessionId) => ipcRenderer.invoke('livingwords:documents:list', sessionId),
+  listCachedDocuments: (sessionId) => ipcRenderer.invoke('livingwords:documents:list-cached', sessionId),
+  readDocumentContent: (fileId, sessionId) =>
+    ipcRenderer.invoke('livingwords:documents:content', fileId, sessionId),
+  importDocuments: (sessionId) => ipcRenderer.invoke('livingwords:documents:import', sessionId),
+  addDocumentFolder: (sessionId) => ipcRenderer.invoke('livingwords:documents:add-folder', sessionId),
+  removeDocument: (id, sessionId) => ipcRenderer.invoke('livingwords:documents:remove', id, sessionId),
   listSessions: () => ipcRenderer.invoke('livingwords:sessions:list'),
   createSession: () => ipcRenderer.invoke('livingwords:sessions:create'),
   saveSession: (session) => ipcRenderer.invoke('livingwords:sessions:save', session),
@@ -21,6 +28,8 @@ contextBridge.exposeInMainWorld('livingWords', Object.freeze({
     ipcRenderer.invoke('livingwords:terminal:close', terminalId, sessionId),
   respondToTerminalCommand: (response) =>
     ipcRenderer.invoke('livingwords:terminal:command-response', response),
+  respondToDocumentEdit: (response) =>
+    ipcRenderer.invoke('livingwords:document:edit-response', response),
   onTerminalData: (listener) => {
     if (typeof listener !== 'function') throw new TypeError('Terminal data listener must be a function.');
     const handler = (_event, data) => listener(data);
@@ -38,6 +47,12 @@ contextBridge.exposeInMainWorld('livingWords', Object.freeze({
     const handler = (_event, request) => listener(request);
     ipcRenderer.on('livingwords:terminal:command-request', handler);
     return () => ipcRenderer.removeListener('livingwords:terminal:command-request', handler);
+  },
+  onDocumentEditRequest: (listener) => {
+    if (typeof listener !== 'function') throw new TypeError('Document edit listener must be a function.');
+    const handler = (_event, request) => listener(request);
+    ipcRenderer.on('livingwords:document:edit-request', handler);
+    return () => ipcRenderer.removeListener('livingwords:document:edit-request', handler);
   },
   cancel: (requestId) => ipcRenderer.invoke('livingwords:cancel', requestId),
   onOpenSettings: (listener) => {

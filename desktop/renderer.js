@@ -2,6 +2,16 @@ import { FitAddon } from '../node_modules/@xterm/addon-fit/lib/addon-fit.mjs';
 import { Terminal } from '../node_modules/@xterm/xterm/lib/xterm.mjs';
 import renderMathInElement from '../node_modules/katex/dist/contrib/auto-render.mjs';
 import { clampSidePanelWidth, SIDE_PANEL_BOUNDS } from './panel-layout.mjs';
+import { buildDocumentDiff } from './document-diff.mjs';
+import { isNearScrollBottom, preservedScrollTop } from './chat-scroll.mjs';
+import {
+  contextUsageForDocument,
+  documentContextCounts,
+  flatContextFileName,
+  folderCanExpand,
+  mergeRetrievedDocumentIds,
+  usedFolderDocuments,
+} from './folder-context.mjs';
 import { MAX_TERMINAL_CONTEXT_LENGTH, readTerminalContext } from './terminal-context.mjs';
 import { createTerminalReadiness } from './terminal-readiness.mjs';
 import { terminalThemeFromColors } from './terminal-theme.mjs';
@@ -23,6 +33,8 @@ const setupDialog = $('setup-dialog');
 const settingsDialog = $('settings-dialog');
 const aboutDialog = $('about-dialog');
 const modelLicenseDialog = $('model-license-dialog');
+const documentViewerDialog = $('document-viewer-dialog');
+const removeDocumentDialog = $('remove-document-dialog');
 const appShell = $('app-shell');
 let contextWindowTokens = DEFAULT_CONTEXT_WINDOW_TOKENS;
 let responseTokenLimit = responseTokenLimitForContext(contextWindowTokens);
@@ -32,12 +44,22 @@ const PANEL_WIDTHS = {
   sessions: { key: 'livingwords-sessions-width', fallback: 264 },
   info: { key: 'livingwords-info-width', fallback: 300 },
 };
+const INFO_STATE_KEY_PREFIX = 'livingwords-info-state:';
+const MAX_DOCUMENT_REFERENCES = 100;
+const MAX_DOCUMENT_CONTEXT_CHARS = 12_000;
 let assistantAvailable = false;
 let sessions = [];
+let libraryDocuments = [];
+let libraryFiles = [];
+let libraryDocumentCount = 0;
+let libraryUnindexedCount = 0;
+let libraryLoadedSessionId = null;
 let activeSessionId = null;
 let responseMeterId = 0;
 const requestStates = new Map();
 const infoSessions = new Map();
+const refreshingDocumentSessions = new Set();
+let pendingDocumentRemoval = null;
 
 function clampPanelWidth(panel, value) {
   return clampSidePanelWidth({
@@ -112,15 +134,73 @@ function infoState(sessionId = activeSessionId) {
   if (!sessionId) return null;
   let state = infoSessions.get(sessionId);
   if (!state) {
-    state = { tabs: [], selectedId: null };
+    state = restoreInfoState(sessionId);
     infoSessions.set(sessionId, state);
+  }
+  const session = sessions.find((item) => item.id === sessionId);
+  if ((session?.selectedDocumentIds ?? []).length > 0
+    && !state.tabs.some((tab) => tab.kind === 'documents')) {
+    const tab = createDocumentTab(sessionId);
+    state.tabs.push(tab);
+    if (!state.selectedId) state.selectedId = tab.id;
+    persistInfoState(sessionId, state);
   }
   return state;
 }
 
+function createDocumentTab(sessionId) {
+  return {
+    id: window.crypto.randomUUID(),
+    sessionId,
+    kind: 'documents',
+    title: 'Documents',
+    surface: document.createElement('div'),
+  };
+}
+
+function restoreInfoState(sessionId) {
+  const serialized = localStorage.getItem(`${INFO_STATE_KEY_PREFIX}${sessionId}`);
+  if (!serialized) return { tabs: [], selectedId: null, open: false };
+
+  let saved;
+  try {
+    saved = JSON.parse(serialized);
+  } catch (error) {
+    console.error(`Could not restore the tools panel state for conversation ${sessionId}: ${error.message}`);
+    return { tabs: [], selectedId: null, open: false };
+  }
+  if (!saved || typeof saved !== 'object' || Array.isArray(saved)) {
+    console.error(`Could not restore the tools panel state for conversation ${sessionId}: saved state is invalid.`);
+    return { tabs: [], selectedId: null, open: false };
+  }
+
+  const hasRestorableDocuments = saved.documents === true;
+  const hadTerminalTabs = saved.terminals === true;
+  const state = {
+    tabs: [],
+    selectedId: null,
+    open: saved.open === true && (hasRestorableDocuments || !hadTerminalTabs),
+  };
+  if (hasRestorableDocuments) {
+    const tab = createDocumentTab(sessionId);
+    state.tabs.push(tab);
+    state.selectedId = tab.id;
+  }
+  return state;
+}
+
+function persistInfoState(sessionId, state = infoSessions.get(sessionId)) {
+  if (!sessionId || !state) return;
+  localStorage.setItem(`${INFO_STATE_KEY_PREFIX}${sessionId}`, JSON.stringify({
+    open: state.open,
+    documents: state.tabs.some((tab) => tab.kind === 'documents'),
+    terminals: state.tabs.some((tab) => tab.kind === 'terminal'),
+  }));
+}
+
 function selectedTerminal(sessionId = activeSessionId) {
   const state = infoSessions.get(sessionId);
-  return state?.tabs.find((tab) => tab.id === state.selectedId) ?? null;
+  return state?.tabs.find((tab) => tab.kind === 'terminal' && tab.id === state.selectedId) ?? null;
 }
 
 function terminalContext(sessionId = activeSessionId) {
@@ -142,6 +222,12 @@ function renderInfoPanel() {
   const state = infoSessions.get(activeSessionId);
   const tabList = $('info-tab-list');
   const panels = $('info-tab-panels');
+  const documentsMenuItem = $('info-add-menu').querySelector('[data-add-info-tab="documents"]');
+  documentsMenuItem.hidden = Boolean(state?.tabs.some((tab) => tab.kind === 'documents'));
+  if (![...$('info-add-menu').querySelectorAll('[role="menuitem"]')].some((item) => !item.hidden)) {
+    $('info-add-menu').hidden = true;
+    $('info-add-tab').setAttribute('aria-expanded', 'false');
+  }
   tabList.replaceChildren();
   panels.replaceChildren();
   if (!state) return;
@@ -156,14 +242,16 @@ function renderInfoPanel() {
     select.id = `info-tab-${tab.id}`;
     select.className = 'info-tab-select';
     select.setAttribute('role', 'tab');
-    select.setAttribute('aria-controls', `terminal-panel-${tab.id}`);
+    select.setAttribute('aria-controls', `info-panel-${tab.id}`);
     select.setAttribute('aria-selected', String(selected));
     select.tabIndex = selected ? 0 : -1;
     select.textContent = tab.title;
     select.addEventListener('click', () => {
       state.selectedId = tab.id;
+      persistInfoState(activeSessionId, state);
       renderInfoPanel();
-      fitTerminal(tab);
+      if (tab.kind === 'terminal') fitTerminal(tab);
+      if (tab.kind === 'documents') void refreshDocumentLibrary(tab.sessionId);
       updateLimitMeters();
     });
     const close = document.createElement('button');
@@ -172,19 +260,31 @@ function renderInfoPanel() {
     close.setAttribute('aria-label', `Close ${tab.title}`);
     close.title = `Close ${tab.title}`;
     close.textContent = '×';
+    const session = sessions.find((item) => item.id === activeSessionId);
+    const documentTabLocked = tab.kind === 'documents' && (session?.selectedDocumentIds ?? []).length > 0;
+    close.hidden = documentTabLocked;
+    close.setAttribute('aria-hidden', String(documentTabLocked));
     close.addEventListener('click', () => closeInfoTab(activeSessionId, tab.id));
     wrapper.append(select, close);
     tabList.append(wrapper);
 
     tab.surface.hidden = !selected;
-    tab.surface.id = `terminal-panel-${tab.id}`;
+    tab.surface.id = `info-panel-${tab.id}`;
     tab.surface.setAttribute('role', 'tabpanel');
     tab.surface.setAttribute('aria-labelledby', `info-tab-${tab.id}`);
     panels.append(tab.surface);
+    if (tab.kind === 'documents') renderDocumentLibrarySurface(tab);
+  }
+}
+
+function renderDocumentLibraryTabs(sessionId) {
+  for (const tab of infoSessions.get(sessionId)?.tabs ?? []) {
+    if (tab.kind === 'documents') renderDocumentLibrarySurface(tab);
   }
 }
 
 function fitTerminal(tab) {
+  if (tab?.kind !== 'terminal') return;
   requestAnimationFrame(() => {
     if (!tab.surface.isConnected || tab.surface.hidden
       || tab.surface.clientWidth === 0 || tab.surface.clientHeight === 0) return;
@@ -251,6 +351,7 @@ async function addTerminalTab(sessionId) {
   const tab = {
     id,
     sessionId,
+    kind: 'terminal',
     title,
     terminal,
     fitAddon,
@@ -262,6 +363,7 @@ async function addTerminalTab(sessionId) {
   };
   state.tabs.push(tab);
   state.selectedId = id;
+  persistInfoState(sessionId, state);
   renderInfoPanel();
   terminal.open(surface);
   function updateCursorMarker() {
@@ -371,6 +473,7 @@ async function ensureTerminalReady(sessionId) {
   if (!tab) tab = await addTerminalTab(sessionId);
   if (!tab?.started) throw new Error('A terminal could not be started for this conversation.');
   state.selectedId = tab.id;
+  persistInfoState(sessionId, state);
   renderInfoPanel();
   await waitForTerminalPanelReady(tab);
   await tab.readiness.waitUntilReady();
@@ -437,20 +540,95 @@ async function handleTerminalCommandRequest(request) {
   }
 }
 
-function closeInfoTab(sessionId, terminalId) {
-  const state = infoSessions.get(sessionId);
-  const index = state?.tabs.findIndex((tab) => tab.id === terminalId) ?? -1;
-  if (!state || index < 0) return;
-  const [tab] = state.tabs.splice(index, 1);
-  tab.readiness.fail(new Error('Terminal closed before the shell prompt was ready.'));
-  tab.resizeObserver?.disconnect();
-  tab.terminal.dispose();
-  void api.closeTerminal(tab.id, sessionId).catch((error) => {
-    showActivity({ kind: 'error', message: `Could not close terminal: ${error.message}` });
+function renderDocumentDiff(oldContent, newContent, preview) {
+  preview.replaceChildren();
+  const diff = buildDocumentDiff(oldContent, newContent);
+  for (const item of diff.lines) {
+    const line = document.createElement('span');
+    line.className = `diff-${item.type}`;
+    const marker = item.type === 'removed' ? '- ' : item.type === 'added' ? '+ ' : '  ';
+    line.textContent = `${marker}${item.text}\n`;
+    preview.append(line);
+  }
+  return diff;
+}
+
+function confirmDocumentEdit(request) {
+  const dialog = $('document-edit-dialog');
+  $('document-edit-copy').textContent =
+    `The assistant proposes changing "${request.name}". Review the diff; the original will only be written if you approve.`;
+  const warning = $('document-edit-warning');
+  const approve = $('document-edit-approve');
+  const result = renderDocumentDiff(request.oldContent, request.newContent, $('document-edit-preview'));
+  warning.hidden = result.previewable;
+  warning.textContent = result.previewable
+    ? ''
+    : 'This change is too large to review safely here. Ask for a smaller edit; nothing has been changed.';
+  approve.disabled = !result.previewable || result.unchanged;
+  return new Promise((resolve) => {
+    dialog.addEventListener('close', () => resolve(dialog.returnValue), { once: true });
+    dialog.showModal();
   });
+}
+
+async function handleDocumentEditRequest(request) {
+  if (!request || typeof request.proposalId !== 'string'
+    || typeof request.requestId !== 'string' || typeof request.sessionId !== 'string'
+    || typeof request.name !== 'string' || typeof request.oldContent !== 'string'
+    || typeof request.newContent !== 'string') return;
+  const state = requestState(request.sessionId);
+  if (state?.requestId === request.requestId) {
+    state.status = 'awaiting-document-approval';
+    if (activeSessionId === request.sessionId) renderSession(activeSession());
+  }
+  let responseSent = false;
+  try {
+    const decision = await confirmDocumentEdit(request);
+    responseSent = true;
+    const result = await api.respondToDocumentEdit({
+      proposalId: request.proposalId,
+      sessionId: request.sessionId,
+      decision: decision === 'approve' ? 'approve' : 'decline',
+    });
+    if (result.applied) {
+      showActivity({ kind: 'complete', message: `Approved changes to "${result.name}".` });
+    }
+  } catch (error) {
+    if (!responseSent) {
+      try {
+        await api.respondToDocumentEdit({
+          proposalId: request.proposalId,
+          sessionId: request.sessionId,
+          decision: 'decline',
+        });
+      } catch (responseError) {
+        showActivity({ kind: 'error', message: `Could not dismiss the document edit proposal: ${responseError.message}` });
+      }
+    }
+    showActivity({ kind: 'error', message: `Could not review or apply the document edit: ${error.message}` });
+  }
+}
+
+function closeInfoTab(sessionId, tabId) {
+  const state = infoSessions.get(sessionId);
+  const index = state?.tabs.findIndex((tab) => tab.id === tabId) ?? -1;
+  if (!state || index < 0) return;
+  const currentTab = state.tabs[index];
+  const session = sessions.find((item) => item.id === sessionId);
+  if (currentTab.kind === 'documents' && (session?.selectedDocumentIds ?? []).length > 0) return;
+  const [tab] = state.tabs.splice(index, 1);
+  if (tab.kind === 'terminal') {
+    tab.readiness.fail(new Error('Terminal closed before the shell prompt was ready.'));
+    tab.resizeObserver?.disconnect();
+    tab.terminal.dispose();
+    void api.closeTerminal(tab.id, sessionId).catch((error) => {
+      showActivity({ kind: 'error', message: `Could not close terminal: ${error.message}` });
+    });
+  }
   if (state.selectedId === tab.id) {
     state.selectedId = state.tabs[Math.min(index, state.tabs.length - 1)]?.id ?? null;
   }
+  persistInfoState(sessionId, state);
   renderInfoPanel();
 }
 
@@ -477,11 +655,578 @@ function closeSessionInfo(sessionId) {
   const state = infoSessions.get(sessionId);
   if (!state) return;
   for (const tab of state.tabs) {
-    tab.readiness.fail(new Error('Conversation closed before the shell prompt was ready.'));
-    tab.resizeObserver?.disconnect();
-    tab.terminal.dispose();
+    if (tab.kind === 'terminal') {
+      tab.readiness.fail(new Error('Conversation closed before the shell prompt was ready.'));
+      tab.resizeObserver?.disconnect();
+      tab.terminal.dispose();
+    }
   }
   infoSessions.delete(sessionId);
+  localStorage.removeItem(`${INFO_STATE_KEY_PREFIX}${sessionId}`);
+}
+
+function selectedDocumentIds(session = activeSession()) {
+  return session?.selectedDocumentIds ?? [];
+}
+
+function renderSelectedDocumentSources() {
+  const session = activeSession();
+  const container = $('selected-document-sources');
+  const chips = $('selected-document-chips');
+  chips.replaceChildren();
+  if (!session || (session.selectedDocumentIds ?? []).length === 0
+    || libraryLoadedSessionId !== session.id) {
+    container.hidden = true;
+    return;
+  }
+  const counts = documentContextCounts(
+    libraryFiles,
+    session.selectedDocumentIds,
+    new Set(session.retrievedDocumentIds ?? []),
+  );
+  chips.textContent = `${counts.used.toLocaleString()}/${counts.total.toLocaleString()} Documents`;
+  container.setAttribute('aria-label', `Documents used in context: ${counts.used} of ${counts.total}`);
+  container.title = `${counts.used} of ${counts.total} attached documents used in this conversation's context`;
+  container.hidden = false;
+}
+
+async function importDocuments(sessionId = activeSessionId) {
+  try {
+    if (!sessionId) return;
+    const result = await api.importDocuments(sessionId);
+    if (result.canceled) return;
+    const addition = result.results;
+    const documents = await api.listDocuments(sessionId);
+    if (activeSessionId === sessionId) libraryLoadedSessionId = sessionId;
+    const session = sessions.find((item) => item.id === sessionId);
+    const previousReferences = session?.selectedDocumentIds ?? [];
+    const newReferenceIds = addition.added.map((item) => item.id);
+    if (session) session.selectedDocumentIds = [...new Set([...previousReferences, ...newReferenceIds])];
+    infoState(sessionId);
+    if (activeSessionId === sessionId) {
+      libraryDocuments = documents.references;
+      libraryFiles = documents.files;
+      libraryDocumentCount = documents.documentCount;
+      libraryUnindexedCount = documents.unindexedCount;
+      if (newReferenceIds.length > 0) openDocumentLibraryTab(sessionId, { refresh: false });
+      renderSelectedDocumentSources();
+    }
+    const attachedCount = newReferenceIds.filter((id) => !previousReferences.includes(id)).length;
+    const summary = [
+      attachedCount > 0 ? `Added ${attachedCount} file or folder ${attachedCount === 1 ? 'reference' : 'references'}.` : '',
+      documents.unindexedCount > 0 ? `${documents.unindexedCount} supported files could not be indexed under the 250 MB local cache limit. The assistant can search them on demand.` : '',
+      ...addition.errors.map((item) => `${item.name}: ${item.error}`),
+    ].filter(Boolean);
+    if (addition.errors.length > 0 || documents.unindexedCount > 0) {
+      showActivity({
+        kind: 'error',
+        message: summary.join(' · ') || 'Some selected files could not be indexed.',
+      });
+    } else if (attachedCount > 0) {
+      showActivity({ kind: 'complete', message: summary.join(' ') });
+    } else {
+      showActivity({ kind: 'complete', message: '' });
+    }
+  } catch (error) {
+    showActivity({ kind: 'error', message: `Could not add documents: ${error.message}` });
+  }
+}
+
+async function addDocumentFolder(sessionId = activeSessionId) {
+  try {
+    if (!sessionId) return;
+    const result = await api.addDocumentFolder(sessionId);
+    if (result.canceled) return;
+    const documents = await api.listDocuments(sessionId);
+    if (activeSessionId === sessionId) libraryLoadedSessionId = sessionId;
+    const session = sessions.find((item) => item.id === sessionId);
+    const previousReferences = session?.selectedDocumentIds ?? [];
+    const newReferenceIds = result.added.map((item) => item.id);
+    if (session) session.selectedDocumentIds = [...new Set([...previousReferences, ...newReferenceIds])];
+    infoState(sessionId);
+    if (activeSessionId === sessionId) {
+      libraryDocuments = documents.references;
+      libraryFiles = documents.files;
+      libraryDocumentCount = documents.documentCount;
+      libraryUnindexedCount = documents.unindexedCount;
+      if (newReferenceIds.length > 0) openDocumentLibraryTab(sessionId, { refresh: false });
+      renderSelectedDocumentSources();
+    }
+    const attachedCount = newReferenceIds.filter((id) => !previousReferences.includes(id)).length;
+    const messages = [
+      attachedCount > 0 ? `Added ${attachedCount} folder reference.` : '',
+      documents.unindexedCount > 0 ? `${documents.unindexedCount} supported files could not be indexed under the 250 MB local cache limit. The assistant can search them on demand.` : '',
+      ...result.errors.map((item) => `${item.name}: ${item.error}`),
+    ].filter(Boolean);
+    if (result.errors.length > 0 || documents.unindexedCount > 0) {
+      showActivity({ kind: 'error', message: messages.join(' · ') || 'Some files in the folder could not be indexed.' });
+    } else if (attachedCount > 0) {
+      showActivity({ kind: 'complete', message: messages.join(' ') });
+    }
+  } catch (error) {
+    showActivity({ kind: 'error', message: `Could not add folder: ${error.message}` });
+  }
+}
+
+function requestDocumentRemoval(sessionId, referenceId, name, kind) {
+  if (removeDocumentDialog.open) return;
+  pendingDocumentRemoval = { sessionId, referenceId, name, kind };
+  $('remove-document-name').textContent = name;
+  $('remove-document-title').textContent = `Remove this ${kind} reference?`;
+  removeDocumentDialog.querySelector('.eyebrow').textContent = `REMOVE ${kind.toLocaleUpperCase()}`;
+  removeDocumentDialog.returnValue = '';
+  removeDocumentDialog.showModal();
+}
+
+async function removeLibraryDocument(sessionId, referenceId, name) {
+  try {
+    const updatedSession = await api.removeDocument(referenceId, sessionId);
+    if (!updatedSession || updatedSession.id !== sessionId) {
+      throw new Error('The updated conversation could not be loaded after document removal.');
+    }
+    const sessionIndex = sessions.findIndex((item) => item.id === sessionId);
+    if (sessionIndex < 0) throw new Error('The conversation is no longer available.');
+    sessions[sessionIndex] = updatedSession;
+    if (activeSessionId === sessionId) renderSession(updatedSession);
+    else renderSessions();
+
+    if (activeSessionId === sessionId) {
+      const listing = await api.listDocuments(sessionId);
+      libraryLoadedSessionId = sessionId;
+      libraryDocuments = listing.references;
+      libraryFiles = listing.files;
+      libraryDocumentCount = listing.documentCount;
+      libraryUnindexedCount = listing.unindexedCount;
+    }
+    if (activeSessionId === sessionId) {
+      renderSelectedDocumentSources();
+      ensureDocumentTab(sessionId);
+      renderInfoPanel();
+    }
+    showActivity({ kind: 'complete', message: `Removed the reference to "${name}". The original was not changed.` });
+  } catch (error) {
+    showActivity({ kind: 'error', message: `Could not remove "${name}": ${error.message}` });
+  }
+}
+
+function reportDocumentList(listing, sessionId) {
+  if (activeSessionId !== sessionId) return;
+  const messages = [];
+  if (listing.unindexedCount > 0) {
+    messages.push(`${listing.unindexedCount} supported files aren't in the local cache under the 250 MB limit; the assistant can search them on demand.`);
+  }
+  messages.push(...listing.errors.map((item) => `${item.name}: ${item.error}`));
+  if (messages.length > 0) showActivity({ kind: 'error', message: messages.join(' · ') });
+}
+
+function documentIcon(kind) {
+  const icon = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+  icon.setAttribute('viewBox', '0 0 24 24');
+  icon.setAttribute('aria-hidden', 'true');
+  const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+  path.setAttribute('d', kind === 'folder'
+    ? 'M3.5 6.5h6l2 2h9v10a1.5 1.5 0 0 1-1.5 1.5h-14a1.5 1.5 0 0 1-1.5-1.5z'
+    : 'M6 3.5h8l4.5 4.5v12a1.5 1.5 0 0 1-1.5 1.5h-11A1.5 1.5 0 0 1 4.5 20V5A1.5 1.5 0 0 1 6 3.5ZM14 4v4h4');
+  icon.append(path);
+  return icon;
+}
+
+function plusIcon() {
+  const icon = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+  icon.setAttribute('viewBox', '0 0 24 24');
+  icon.setAttribute('aria-hidden', 'true');
+  const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+  path.setAttribute('d', 'M12 5v14M5 12h14');
+  icon.append(path);
+  return icon;
+}
+
+function searchIcon() {
+  const icon = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+  icon.setAttribute('viewBox', '0 0 24 24');
+  icon.setAttribute('aria-hidden', 'true');
+  const circle = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
+  circle.setAttribute('cx', '10.8');
+  circle.setAttribute('cy', '10.8');
+  circle.setAttribute('r', '6.5');
+  const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+  path.setAttribute('d', 'm16 16 4 4');
+  icon.append(circle, path);
+  return icon;
+}
+
+function documentActionButton(action, label, onClick) {
+  const paths = {
+    view: 'M2.5 12s3.2-6 9.5-6 9.5 6 9.5 6-3.2 6-9.5 6-9.5-6-9.5-6Zm9.5-3a3 3 0 1 0 0 6 3 3 0 0 0 0-6Z',
+    remove: 'M4 7h16M9 7V4h6v3m3 0-.8 13H6.8L6 7m4 3v6m4-6v6',
+  };
+  const button = document.createElement('button');
+  button.type = 'button';
+  button.className = `document-action-button document-${action}-button`;
+  button.setAttribute('aria-label', label);
+  button.title = label;
+  button.append(documentIcon(action));
+  button.querySelector('path').setAttribute('d', paths[action]);
+  button.addEventListener('click', onClick);
+  return button;
+}
+
+async function openDocumentViewer(sessionId, fileId, fallbackName = 'Document', location = {}) {
+  try {
+    const content = await api.readDocumentContent(fileId, sessionId);
+    $('document-viewer-title').textContent = content.name || fallbackName;
+    const locationLabel = Number.isSafeInteger(location.startLine) && location.startLine > 0
+      ? ` · Context at line ${location.startLine}`
+      : Number.isSafeInteger(location.page) && location.page > 0
+        ? ` · Context from page ${location.page}`
+        : '';
+    $('document-viewer-meta').textContent = `${content.extension.slice(1).toUpperCase()} · ${content.text.length.toLocaleString()} characters${locationLabel}`;
+    const viewerContent = $('document-viewer-content');
+    viewerContent.textContent = content.text;
+    viewerContent.scrollTop = 0;
+    viewerContent.scrollLeft = 0;
+    documentViewerDialog.scrollTop = 0;
+    if (!documentViewerDialog.open) documentViewerDialog.showModal();
+    const lineHeight = Number.parseFloat(getComputedStyle(viewerContent).lineHeight);
+    if (Number.isSafeInteger(location.startLine) && location.startLine > 0 && Number.isFinite(lineHeight)) {
+      viewerContent.scrollTop = Math.max(0, (location.startLine - 1) * lineHeight);
+    }
+  } catch (error) {
+    showActivity({ kind: 'error', message: `Could not open "${fallbackName}": ${error.message}` });
+  }
+}
+
+function renderDocumentLibrarySurface(tab) {
+  const surface = document.createElement('section');
+  surface.className = 'document-library-surface';
+  const search = document.createElement('input');
+  search.type = 'search';
+  search.className = 'document-library-search';
+  search.placeholder = 'Filter by filename';
+  search.setAttribute('aria-label', 'Filter documents by filename');
+  search.hidden = true;
+  let applyDocumentFilter = () => {};
+
+  const heading = document.createElement('div');
+  heading.className = 'document-library-heading';
+  const title = document.createElement('h2');
+  title.textContent = 'Documents';
+  const headerActions = document.createElement('div');
+  headerActions.className = 'document-header-actions';
+  const searchToggle = document.createElement('button');
+  searchToggle.type = 'button';
+  searchToggle.className = 'document-search-toggle';
+  searchToggle.setAttribute('aria-label', 'Search documents');
+  searchToggle.setAttribute('aria-expanded', 'false');
+  searchToggle.title = 'Search documents';
+  searchToggle.append(searchIcon());
+  searchToggle.addEventListener('click', () => {
+    const isOpening = search.hidden;
+    search.hidden = !isOpening;
+    searchToggle.setAttribute('aria-expanded', String(isOpening));
+    searchToggle.setAttribute('aria-label', isOpening ? 'Close document search' : 'Search documents');
+    searchToggle.title = isOpening ? 'Close document search' : 'Search documents';
+    if (isOpening) search.focus();
+    else {
+      search.value = '';
+      applyDocumentFilter();
+    }
+  });
+  const addWrap = document.createElement('div');
+  addWrap.className = 'document-add-wrap';
+  const add = document.createElement('button');
+  add.type = 'button';
+  add.className = 'document-add-button';
+  add.append(plusIcon());
+  add.setAttribute('aria-label', 'Add files or folders');
+  add.title = 'Add files or folders';
+  add.setAttribute('aria-haspopup', 'menu');
+  add.setAttribute('aria-expanded', 'false');
+  const addMenu = document.createElement('div');
+  addMenu.className = 'document-add-menu';
+  addMenu.setAttribute('role', 'menu');
+  addMenu.hidden = true;
+  for (const [action, text] of [['files', 'Add files'], ['folder', 'Add folder']]) {
+    const option = document.createElement('button');
+    option.type = 'button';
+    option.setAttribute('role', 'menuitem');
+    option.textContent = text;
+    option.addEventListener('click', () => {
+      addMenu.hidden = true;
+      add.setAttribute('aria-expanded', 'false');
+      if (action === 'files') void importDocuments(tab.sessionId);
+      else void addDocumentFolder(tab.sessionId);
+    });
+    addMenu.append(option);
+  }
+  add.addEventListener('click', () => {
+    addMenu.hidden = !addMenu.hidden;
+    add.setAttribute('aria-expanded', String(!addMenu.hidden));
+  });
+  addWrap.append(add, addMenu);
+  headerActions.append(searchToggle, addWrap);
+  heading.append(title, headerActions);
+  surface.append(heading);
+
+  surface.append(search);
+  const count = document.createElement('p');
+  count.className = 'document-selection-count';
+  count.textContent = `${libraryDocumentCount} ${libraryDocumentCount === 1 ? 'Document' : 'Documents'}`;
+  surface.append(count);
+  if (libraryUnindexedCount > 0) {
+    const overflow = document.createElement('p');
+    overflow.className = 'document-library-warning';
+    overflow.textContent = `${libraryUnindexedCount} supported files aren't in the local index cache. The assistant can search them on demand.`;
+    surface.append(overflow);
+  }
+
+  const list = document.createElement('div');
+  list.className = 'document-library-list';
+  if (libraryDocuments.length === 0) {
+    const empty = document.createElement('p');
+    empty.className = 'document-library-empty';
+    empty.textContent = 'No file or folder references yet.';
+    list.append(empty);
+  } else {
+    const session = sessions.find((candidate) => candidate.id === tab.sessionId);
+    for (const item of libraryDocuments) {
+      const makeFileRow = (
+        file,
+        canRemove,
+        viewable = true,
+        displayName = file.name,
+        searchText = file.name,
+        contextUsage = [],
+      ) => {
+        const row = document.createElement('div');
+        row.className = 'document-library-item';
+        row.dataset.search = searchText.toLocaleLowerCase();
+        row.append(documentIcon('file'));
+        const name = document.createElement('strong');
+        name.className = 'document-library-name';
+        name.textContent = displayName;
+        row.append(name);
+        const actions = document.createElement('div');
+        actions.className = 'document-library-actions';
+        const view = documentActionButton('view', `View ${displayName}`, () =>
+          void openDocumentViewer(tab.sessionId, file.id, displayName));
+        view.disabled = !viewable;
+        actions.append(view);
+        if (canRemove) {
+          actions.append(documentActionButton('remove', `Remove ${item.name} reference from this conversation`, () =>
+            requestDocumentRemoval(tab.sessionId, item.id, item.name, item.kind)));
+        }
+        row.append(actions);
+        if (contextUsage.length > 0) {
+          const usageDetails = document.createElement('details');
+          usageDetails.className = 'document-context-provenance';
+          const usageSummary = document.createElement('summary');
+          usageSummary.textContent = `Included in context · ${contextUsage.length} ${contextUsage.length === 1 ? 'passage' : 'passages'}`;
+          usageDetails.append(usageSummary);
+          for (const usage of [...contextUsage].reverse()) {
+            const entry = document.createElement('div');
+            entry.className = 'document-context-evidence';
+            const methodLabels = {
+              'attached-document': 'Attached excerpt',
+              'document-search': 'Document search',
+              'document-read': 'Document read',
+              citation: 'Cited source',
+              'folder-instructions': 'Folder instructions',
+              'folder-read': 'Folder read',
+              'folder-grep': 'Folder search match',
+            };
+            const location = usage.startLine
+              ? ` · lines ${usage.startLine}${usage.endLine && usage.endLine !== usage.startLine ? `–${usage.endLine}` : ''}`
+              : usage.page
+                ? ` · page ${usage.page}`
+                : '';
+            const label = document.createElement('p');
+            label.className = 'document-context-evidence-label';
+            label.textContent = `${methodLabels[usage.method] ?? 'Document context'}${location}`;
+            entry.append(label);
+            if (usage.name && usage.name !== displayName) {
+              const path = document.createElement('p');
+              path.className = 'document-context-evidence-path';
+              path.textContent = usage.name;
+              entry.append(path);
+            }
+            const excerpt = document.createElement('blockquote');
+            excerpt.textContent = usage.excerpt;
+            entry.append(excerpt);
+            if (usage.truncated) {
+              const shortened = document.createElement('p');
+              shortened.className = 'document-context-evidence-note';
+              shortened.textContent = 'Excerpt shortened; open the document to inspect more.';
+              entry.append(shortened);
+            }
+            const open = document.createElement('button');
+            open.type = 'button';
+            open.className = 'document-context-open';
+            open.textContent = usage.startLine ? `Open at line ${usage.startLine}` : 'Open document';
+            open.addEventListener('click', () => void openDocumentViewer(
+              tab.sessionId,
+              file.id,
+              displayName,
+              { startLine: usage.startLine, page: usage.page },
+            ));
+            entry.append(open);
+            usageDetails.append(entry);
+          }
+          row.append(usageDetails);
+        }
+        return row;
+      };
+
+      if (item.kind === 'file') {
+        const file = libraryFiles.find((candidate) => candidate.referenceIds.includes(item.id));
+        const usage = file?.id ? contextUsageForDocument(session?.messages ?? [], file.id) : [];
+        list.append(makeFileRow(file ?? { id: null, name: item.name }, true, Boolean(file), item.name, item.name, usage));
+        continue;
+      }
+
+      const folderFiles = libraryFiles.filter((file) => file.referenceIds.includes(item.id));
+      const retrievedDocumentIds = new Set(
+        sessions.find((session) => session.id === tab.sessionId)?.retrievedDocumentIds ?? [],
+      );
+      const files = usedFolderDocuments(folderFiles, retrievedDocumentIds);
+      const flatFiles = [...files].sort((left, right) =>
+        flatContextFileName(left.name).localeCompare(flatContextFileName(right.name))
+        || left.name.localeCompare(right.name));
+      const group = document.createElement('section');
+      group.className = 'document-folder-group';
+      group.dataset.search = `${item.name} ${flatFiles.map((file) => flatContextFileName(file.name)).join(' ')}`.toLocaleLowerCase();
+      const row = document.createElement('div');
+      row.className = 'document-library-item document-folder-row';
+      row.append(documentIcon('folder'));
+      const folderName = document.createElement('strong');
+      folderName.className = 'document-library-name';
+      folderName.textContent = item.name;
+      row.append(folderName);
+      const contextCount = document.createElement('span');
+      contextCount.className = 'document-context-count';
+      contextCount.textContent = String(files.length);
+      contextCount.setAttribute('aria-label', `${files.length} files used in this conversation's context`);
+      row.append(contextCount);
+      const actions = document.createElement('div');
+      actions.className = 'document-library-actions';
+      const expand = document.createElement('button');
+      expand.type = 'button';
+      expand.className = 'document-folder-toggle';
+      const canExpand = folderCanExpand(files);
+      expand.disabled = !canExpand;
+      expand.dataset.userExpanded = 'false';
+      expand.setAttribute('aria-expanded', 'false');
+      expand.setAttribute('aria-label', canExpand
+        ? `Expand ${item.name}`
+        : `No files from ${item.name} have been used in this conversation's context yet`);
+      if (!canExpand) expand.title = `No files from ${item.name} have been used in this conversation's context yet`;
+      expand.textContent = '›';
+      actions.append(expand);
+      actions.append(documentActionButton('remove', `Remove ${item.name} reference from this conversation`, () =>
+        requestDocumentRemoval(tab.sessionId, item.id, item.name, item.kind)));
+      row.append(actions);
+      const children = document.createElement('div');
+      children.className = 'document-folder-children';
+      children.hidden = true;
+      const note = document.createElement('p');
+      note.className = 'document-folder-note';
+      note.textContent = 'Only files used in this conversation are shown.';
+      children.append(note);
+      if (files.length === 0) {
+        const empty = document.createElement('p');
+        empty.className = 'document-library-empty';
+        empty.textContent = 'No files from this folder have been used in the conversation context yet.';
+        children.append(empty);
+      } else {
+        for (const file of flatFiles) {
+          const displayName = flatContextFileName(file.name);
+          const usage = contextUsageForDocument(session?.messages ?? [], file.id);
+          children.append(makeFileRow(file, false, true, displayName, displayName, usage));
+        }
+      }
+      expand.addEventListener('click', () => {
+        children.hidden = !children.hidden;
+        expand.dataset.userExpanded = String(!children.hidden);
+        expand.setAttribute('aria-expanded', String(!children.hidden));
+        expand.setAttribute('aria-label', `${children.hidden ? 'Expand' : 'Collapse'} ${item.name}`);
+        expand.textContent = children.hidden ? '›' : '⌄';
+      });
+      group.append(row, children);
+      list.append(group);
+    }
+  }
+  surface.append(list);
+  applyDocumentFilter = () => {
+    const query = search.value.trim().toLocaleLowerCase();
+    for (const row of list.querySelectorAll('.document-library-item')) {
+      const group = row.closest('.document-folder-group');
+      if (!group || row.classList.contains('document-folder-row')) {
+        const target = group ?? row;
+        target.hidden = !target.dataset.search.includes(query);
+        if (query && group) {
+          const rootChildren = group.querySelector(':scope > .document-folder-children');
+          const rootToggle = group.querySelector(':scope > .document-folder-row .document-folder-toggle');
+          if (rootChildren && rootToggle) {
+            rootChildren.hidden = false;
+            rootToggle.setAttribute('aria-expanded', 'true');
+            rootToggle.textContent = '⌄';
+          }
+        } else if (!query && group) {
+          const rootChildren = group.querySelector(':scope > .document-folder-children');
+          const rootToggle = group.querySelector(':scope > .document-folder-row .document-folder-toggle');
+          if (rootChildren && rootToggle) {
+            const expanded = rootToggle.dataset.userExpanded === 'true';
+            rootChildren.hidden = !expanded;
+            rootToggle.setAttribute('aria-expanded', String(expanded));
+            rootToggle.textContent = expanded ? '⌄' : '›';
+          }
+        }
+      }
+    }
+    for (const row of list.querySelectorAll('.document-folder-children .document-library-item')) {
+      const queryMatch = row.dataset.search.includes(query);
+      row.hidden = !queryMatch;
+      if (query && queryMatch) {
+        const children = row.parentElement;
+        children.hidden = false;
+        const toggle = children.previousElementSibling.querySelector('.document-folder-toggle');
+        toggle.setAttribute('aria-expanded', 'true');
+        toggle.textContent = '⌄';
+      }
+    }
+  };
+  search.addEventListener('input', applyDocumentFilter);
+  tab.surface.replaceChildren(surface);
+}
+
+function openDocumentLibraryTab(sessionId = activeSessionId, { refresh = true } = {}) {
+  if (!sessionId) return;
+  const state = infoState(sessionId);
+  let tab = state.tabs.find((item) => item.kind === 'documents');
+  if (!tab) {
+    tab = createDocumentTab(sessionId);
+    state.tabs.push(tab);
+  }
+  state.selectedId = tab.id;
+  persistInfoState(sessionId, state);
+  openInfoPanel();
+  renderInfoPanel();
+  if (refresh && (sessions.find((session) => session.id === sessionId)?.selectedDocumentIds ?? []).length > 0) {
+    void refreshDocumentLibrary(sessionId);
+  }
+}
+
+function ensureDocumentTab(sessionId) {
+  if (!sessionId) return null;
+  const state = infoState(sessionId);
+  let tab = state.tabs.find((item) => item.kind === 'documents');
+  if (!tab) {
+    tab = createDocumentTab(sessionId);
+    state.tabs.push(tab);
+    if (!state.selectedId) state.selectedId = tab.id;
+    persistInfoState(sessionId, state);
+  }
+  return tab;
 }
 
 function activeSession() {
@@ -514,7 +1259,9 @@ function estimatedPromptTokens(question, history, selectedTerminalOutput = '') {
     : `Prior conversation:\n${history.map(({ role, content }) =>
       `${role === 'user' ? 'User' : 'Assistant'}: ${content}`
     ).join('\n')}\n\nCurrent question:\n${question}`;
-  return estimateTokens(`${SYSTEM_PROMPT}\n${selectedTerminalOutput}\n${prompt}`);
+  const selectedCount = selectedDocumentIds().length;
+  const documentBudget = selectedCount > 0 ? MAX_DOCUMENT_CONTEXT_CHARS : 0;
+  return estimateTokens(`${SYSTEM_PROMPT}\n${selectedTerminalOutput}\n${prompt}`) + estimateTokens(' '.repeat(documentBudget));
 }
 
 function updateContextMeter(value) {
@@ -545,7 +1292,6 @@ function updateLimitMeters() {
 function updateComposerControls() {
   const state = requestState(activeSessionId);
   sendButton.disabled = !assistantAvailable || Boolean(state);
-  prompt.disabled = Boolean(state);
   cancelButton.hidden = !state || !['queued', 'running'].includes(state.status);
   cancelButton.disabled = !state || !['queued', 'running'].includes(state.status);
   cancelButton.textContent = state?.status === 'queued' ? 'Remove from queue' : 'Cancel';
@@ -554,9 +1300,12 @@ function updateComposerControls() {
 
 function showActivity(activity) {
   const container = $('activity');
+  const message = activity.message || '';
+  const isError = activity.kind === 'error' || activity.kind === 'startup-error';
   container.hidden = !activity.message;
-  container.classList.toggle('activity-error', activity.kind === 'error' || activity.kind === 'startup-error');
-  $('activity-message').textContent = activity.message || '';
+  container.classList.toggle('activity-error', isError);
+  $('activity-message').textContent = message;
+  $('activity-clear').hidden = !isError || !message;
   if (activity.kind === 'complete') container.hidden = true;
 }
 
@@ -595,6 +1344,7 @@ function renderSessions() {
   for (const session of filtered) {
     const item = document.createElement('div');
     item.className = 'session-item';
+    item.dataset.sessionId = session.id;
     item.classList.toggle('selected', session.id === activeSessionId);
 
     const openButton = document.createElement('button');
@@ -612,13 +1362,17 @@ function renderSessions() {
     if (state) {
       preview.classList.add('session-thinking');
       preview.setAttribute('role', 'status');
-      preview.textContent = state.status === 'queued'
-        ? `Queued${state.queuePosition ? ` · ${state.queuePosition}` : ''}`
-        : state.status === 'cancelling'
-          ? 'Cancelling…'
-          : state.status === 'saving'
-            ? 'Submitting…'
-            : 'Thinking…';
+      preview.textContent = state.answer
+        ? 'Typing…'
+        : state.status === 'queued'
+          ? `Queued${state.queuePosition ? ` · ${state.queuePosition}` : ''}`
+          : state.status === 'cancelling'
+            ? 'Cancelling…'
+            : state.status === 'saving' || state.status === 'submitting'
+              ? 'Submitting…'
+              : state.status === 'awaiting-command-approval'
+                ? 'Awaiting approval…'
+                : 'Thinking…';
     } else {
       preview.textContent = lastMessage?.content ?? 'New conversation';
     }
@@ -649,24 +1403,63 @@ function formatSessionDate(value) {
   return new Intl.DateTimeFormat(undefined, { month: 'short', day: 'numeric' }).format(date);
 }
 
-function renderMarkdown(content) {
+function renderMarkdown(content, { renderMath = true } = {}) {
   const html = window.marked.parse(content);
   const container = document.createElement('div');
   container.innerHTML = window.DOMPurify.sanitize(html);
-  renderMathInElement(container, {
-    delimiters: [
-      { left: '$$', right: '$$', display: true },
-      { left: '$', right: '$', display: false },
-      { left: '\\[', right: '\\]', display: true },
-      { left: '\\(', right: '\\)', display: false },
-    ],
-    throwOnError: false,
-    trust: false,
-  });
+  if (renderMath) {
+    renderMathInElement(container, {
+      delimiters: [
+        { left: '$$', right: '$$', display: true },
+        { left: '$', right: '$', display: false },
+        { left: '\\[', right: '\\]', display: true },
+        { left: '\\(', right: '\\)', display: false },
+      ],
+      throwOnError: false,
+      trust: false,
+    });
+  }
   return container.innerHTML;
 }
 
-function responseFooter(content, { streaming = false } = {}) {
+function linkDocumentCitations(container, sources) {
+  if (!Array.isArray(sources) || sources.length === 0) return;
+  const sourceMap = new Map(sources.map((source) => [source.citationId, source]));
+  const walker = document.createTreeWalker(container, NodeFilter.SHOW_TEXT);
+  const textNodes = [];
+  while (walker.nextNode()) textNodes.push(walker.currentNode);
+
+  for (const node of textNodes) {
+    const text = node.nodeValue ?? '';
+    const pattern = /\[S\d{1,3}\]/gu;
+    let previousIndex = 0;
+    let match;
+    const fragment = document.createDocumentFragment();
+    let changed = false;
+    while ((match = pattern.exec(text)) !== null) {
+      const source = sourceMap.get(match[0].slice(1, -1));
+      if (!source || typeof source.documentId !== 'string') continue;
+      changed = true;
+      fragment.append(document.createTextNode(text.slice(previousIndex, match.index)));
+      const citation = document.createElement('button');
+      citation.type = 'button';
+      citation.className = 'inline-citation';
+      citation.textContent = match[0];
+      citation.setAttribute('aria-label', `Open cited document ${source.name}`);
+      citation.addEventListener('click', () => {
+        void openDocumentViewer(activeSessionId, source.documentId, source.name, { page: source.page });
+      });
+      fragment.append(citation);
+      previousIndex = match.index + match[0].length;
+    }
+    if (changed) {
+      fragment.append(document.createTextNode(text.slice(previousIndex)));
+      node.replaceWith(fragment);
+    }
+  }
+}
+
+function responseFooter(content) {
   const footer = document.createElement('div');
   footer.className = 'response-footer';
 
@@ -709,7 +1502,7 @@ function responseFooter(content, { streaming = false } = {}) {
   ring.setAttribute('aria-valuenow', String(Math.min(tokens, responseTokenLimit)));
   ring.setAttribute(
     'aria-valuetext',
-    `Approximately ${tokens} of ${responseTokenLimit} response tokens${streaming ? ', response in progress' : ''}`,
+    `Approximately ${tokens} of ${responseTokenLimit} response tokens`,
   );
   ring.setAttribute('aria-describedby', tooltipId);
 
@@ -720,7 +1513,7 @@ function responseFooter(content, { streaming = false } = {}) {
   const heading = document.createElement('div');
   heading.className = 'limit-meter-heading';
   const title = document.createElement('span');
-  title.textContent = streaming ? 'Response so far' : 'Response estimate';
+  title.textContent = 'Response estimate';
   const count = document.createElement('span');
   count.textContent = `~${tokens.toLocaleString()} / ${responseTokenLimit} tokens`;
   heading.append(title, count);
@@ -773,10 +1566,12 @@ function renderMessage(message) {
   content.className = 'message-content';
   if (message.role === 'assistant') {
     content.innerHTML = renderMarkdown(message.content);
+    linkDocumentCitations(content, message.sources);
   } else {
     content.textContent = message.content;
   }
   wrapper.append(content);
+
   if (message.status === 'truncated' || message.status === 'interrupted') {
     const notice = document.createElement('div');
     notice.className = 'message-notice';
@@ -803,8 +1598,8 @@ function renderPendingMessage(state) {
   if (state.answer) {
     const content = document.createElement('div');
     content.className = 'message-content';
-    content.innerHTML = renderMarkdown(state.answer);
-    wrapper.append(label, content, responseFooter(state.answer, { streaming: true }));
+    content.innerHTML = renderMarkdown(state.answer, { renderMath: false });
+    wrapper.append(label, content);
     messages.append(wrapper);
     return;
   }
@@ -830,7 +1625,21 @@ function renderPendingMessage(state) {
 function renderSession(session) {
   if (!session) return;
   const sessionChanged = activeSessionId !== session.id;
+  const previousScrollTop = messages.scrollTop;
   activeSessionId = session.id;
+  if (sessionChanged) {
+    libraryDocuments = [];
+    libraryFiles = [];
+    libraryDocumentCount = 0;
+    libraryUnindexedCount = 0;
+    libraryLoadedSessionId = null;
+    const panelOpen = infoState(session.id)?.open ?? false;
+    appShell.classList.toggle('info-collapsed', !panelOpen);
+    $('info-panel').hidden = !panelOpen;
+    $('info-toggle').setAttribute('aria-expanded', String(panelOpen));
+    $('info-toggle').title = panelOpen ? 'Hide tools and documents' : 'Show tools and documents';
+  }
+  if ((session.selectedDocumentIds ?? []).length > 0) ensureDocumentTab(session.id);
   $('conversation-title').textContent = session.title || 'A thoughtful place to begin';
   messages.replaceChildren();
   const state = requestState(session.id);
@@ -840,13 +1649,21 @@ function renderSession(session) {
   messages.style.display = showMessages ? 'flex' : 'none';
   for (const message of session.messages) renderMessage(message);
   if (state && state.status !== 'saving') renderPendingMessage(state);
-  messages.scrollTop = messages.scrollHeight;
+  messages.scrollTop = state?.autoScroll === false
+    ? preservedScrollTop(previousScrollTop, messages.scrollHeight, messages.clientHeight)
+    : messages.scrollHeight;
+  renderSelectedDocumentSources();
   updateComposerControls();
   renderSessions();
   if (sessionChanged) {
     renderInfoPanel();
     const tab = selectedTerminal(session.id);
     if (tab) fitTerminal(tab);
+    void loadDocumentLibrary(session.id).catch((error) => {
+      if (activeSessionId === session.id) {
+        showActivity({ kind: 'error', message: `Could not load this conversation's documents: ${error.message}` });
+      }
+    });
   }
 }
 
@@ -873,7 +1690,7 @@ async function deleteSession(id) {
     return;
   }
   $('delete-dialog-copy').textContent =
-    `"${session.title || 'New conversation'}" and its messages will be permanently deleted.`;
+    `"${session.title || 'New conversation'}", its messages, document references, and local indexes will be permanently deleted. Original files will not be deleted.`;
   const deleteDialog = $('delete-dialog');
   const confirmed = await new Promise((resolve) => {
     deleteDialog.addEventListener('close', () => {
@@ -884,7 +1701,7 @@ async function deleteSession(id) {
   if (!confirmed) return;
 
   try {
-    await api.deleteSession(id);
+    const deletion = await api.deleteSession(id);
     sessions = sessions.filter((item) => item.id !== id);
     closeSessionInfo(id);
     if (activeSessionId === id) {
@@ -905,7 +1722,10 @@ async function deleteSession(id) {
     } else {
       renderSessions();
     }
-    showActivity({ kind: 'complete', message: 'Conversation deleted.' });
+    showActivity({
+      kind: deletion?.cleanupWarning ? 'error' : 'complete',
+      message: deletion?.cleanupWarning ?? 'Conversation and its documents deleted.',
+    });
   } catch (error) {
     showActivity({ kind: 'error', message: `Could not delete this conversation: ${error.message}` });
   }
@@ -942,7 +1762,9 @@ function applyTheme(theme) {
     accentContrast: styles.getPropertyValue('--accent-contrast'),
   });
   for (const state of infoSessions.values()) {
-    for (const tab of state.tabs) tab.terminal.options.theme = terminalTheme;
+    for (const tab of state.tabs) {
+      if (tab.kind === 'terminal') tab.terminal.options.theme = terminalTheme;
+    }
   }
   for (const button of document.querySelectorAll('[data-theme-choice]')) {
     button.setAttribute('aria-pressed', String(button.dataset.themeChoice === selected));
@@ -1024,12 +1846,17 @@ async function loadContextWindowPreference() {
 }
 
 function openInfoPanel() {
+  const state = infoState();
+  if (state) {
+    state.open = true;
+    persistInfoState(activeSessionId, state);
+  }
   appShell.classList.remove('sessions-open');
   $('chat-nav').setAttribute('aria-expanded', 'false');
   appShell.classList.remove('info-collapsed');
   $('info-panel').hidden = false;
   $('info-toggle').setAttribute('aria-expanded', 'true');
-  $('info-toggle').title = 'Hide tools panel';
+  $('info-toggle').title = 'Hide tools and documents';
   setPanelWidth('info', Number.parseFloat(getComputedStyle(appShell).getPropertyValue('--info-width')) || PANEL_WIDTHS.info.fallback);
   setPanelWidth('sessions', Number.parseFloat(getComputedStyle(appShell).getPropertyValue('--sessions-width')) || PANEL_WIDTHS.sessions.fallback);
   setPanelWidth('info', Number.parseFloat(getComputedStyle(appShell).getPropertyValue('--info-width')) || PANEL_WIDTHS.info.fallback);
@@ -1039,10 +1866,15 @@ function openInfoPanel() {
 }
 
 function closeInfoPanel() {
+  const state = infoState();
+  if (state) {
+    state.open = false;
+    persistInfoState(activeSessionId, state);
+  }
   appShell.classList.add('info-collapsed');
   $('info-panel').hidden = true;
   $('info-toggle').setAttribute('aria-expanded', 'false');
-  $('info-toggle').title = 'Show tools panel';
+  $('info-toggle').title = 'Show tools and documents';
   $('info-toggle').focus();
 }
 
@@ -1085,6 +1917,44 @@ async function loadSessions() {
   renderSession(sessions[0]);
 }
 
+async function loadDocumentLibrary(sessionId) {
+  const documents = await api.listCachedDocuments(sessionId);
+  if (activeSessionId !== sessionId) return;
+  libraryLoadedSessionId = sessionId;
+  libraryDocuments = documents.references;
+  libraryFiles = documents.files;
+  libraryDocumentCount = documents.documentCount;
+  libraryUnindexedCount = documents.unindexedCount;
+  if ((activeSession()?.selectedDocumentIds ?? []).length > 0) ensureDocumentTab(sessionId);
+  renderSelectedDocumentSources();
+  if (infoSessions.get(sessionId)?.tabs.some((tab) => tab.kind === 'documents')) renderInfoPanel();
+}
+
+async function refreshDocumentLibrary(sessionId) {
+  if (refreshingDocumentSessions.has(sessionId)) return;
+  refreshingDocumentSessions.add(sessionId);
+  try {
+    const documents = await api.listDocuments(sessionId);
+    if (activeSessionId !== sessionId) return;
+    libraryLoadedSessionId = sessionId;
+    libraryDocuments = documents.references;
+    libraryFiles = documents.files;
+    libraryDocumentCount = documents.documentCount;
+    libraryUnindexedCount = documents.unindexedCount;
+    renderSelectedDocumentSources();
+    if (infoSessions.get(sessionId)?.tabs.some((tab) => tab.kind === 'documents')) {
+      renderInfoPanel();
+    }
+    reportDocumentList(documents, sessionId);
+  } catch (error) {
+    if (activeSessionId === sessionId) {
+      showActivity({ kind: 'error', message: `Could not refresh this conversation's documents: ${error.message}` });
+    }
+  } finally {
+    refreshingDocumentSessions.delete(sessionId);
+  }
+}
+
 async function ask(question) {
   if (!assistantAvailable) {
     setupDialog.showModal();
@@ -1103,6 +1973,7 @@ async function ask(question) {
     answer: '',
     promptTokens: estimatedPromptTokens(question, history, selectedTerminalOutput),
     renderScheduled: false,
+    autoScroll: true,
   };
   const previousTitle = session.title;
   const userMessage = { role: 'user', content: question };
@@ -1116,6 +1987,7 @@ async function ask(question) {
     messages.scrollTop = messages.scrollHeight;
   }
   prompt.value = '';
+  prompt.focus();
   try {
     try {
       await saveSession(session);
@@ -1174,36 +2046,68 @@ async function handleRequestResult(result) {
   if (!session) return;
   const state = requestState(result.sessionId);
   if (state && state.requestId !== result.requestId) return;
+  const previousScrollTop = messages.scrollTop;
+  const shouldAutoScroll = state?.autoScroll !== false;
   requestStates.delete(result.sessionId);
   let markerAlreadyPersisted = false;
+  const retrievedDocumentIds = Array.isArray(result.retrievedDocumentIds)
+    ? result.retrievedDocumentIds.filter((id) => typeof id === 'string' && /^[0-9a-f-]{36}$/u.test(id))
+    : [];
+  const contextUsage = Array.isArray(result.contextUsage) ? result.contextUsage : [];
+  const contextUsageProperty = contextUsage.length > 0 ? { contextUsage } : {};
+  const retrievedDocumentsChanged = mergeRetrievedDocumentIds(session, retrievedDocumentIds);
 
   if (result.status === 'completed') {
     session.messages.push({
       role: 'assistant',
       content: result.answer,
       ...(result.finishReason === 'length' ? { status: 'truncated' } : {}),
+      ...(Array.isArray(result.sources) && result.sources.length > 0 ? { sources: result.sources } : {}),
+      ...contextUsageProperty,
     });
   } else if (result.status === 'cancelled') {
-    if (state?.answer) {
-      session.messages.push({ role: 'assistant', content: state.answer, status: 'interrupted' });
+    const partialAnswer = result.answer ?? state?.answer;
+    if (partialAnswer) {
+      session.messages.push({
+        role: 'assistant',
+        content: partialAnswer,
+        status: 'interrupted',
+        ...(Array.isArray(result.sources) && result.sources.length > 0 ? { sources: result.sources } : {}),
+        ...contextUsageProperty,
+      });
     }
     const lastMessage = session.messages.at(-1);
     markerAlreadyPersisted = lastMessage?.role === 'assistant'
       && lastMessage.status === 'cancelled'
       && lastMessage.content === 'This response was cancelled.';
-    if (!markerAlreadyPersisted) {
+    if (!markerAlreadyPersisted || retrievedDocumentsChanged) {
       session.messages.push({
         role: 'assistant',
         content: 'This response was cancelled.',
         status: 'cancelled',
+        ...contextUsageProperty,
       });
+    } else if (contextUsage.length > 0) {
+      session.messages[session.messages.length - 1] = {
+        ...lastMessage,
+        contextUsage: [...(lastMessage.contextUsage ?? []), ...contextUsage].slice(-100),
+      };
+      markerAlreadyPersisted = false;
     }
   } else {
-    session.messages.push(state?.answer
-      ? { role: 'assistant', content: state.answer, status: 'interrupted' }
+    const partialAnswer = result.answer ?? state?.answer;
+    session.messages.push(partialAnswer
+      ? {
+          role: 'assistant',
+          content: partialAnswer,
+          status: 'interrupted',
+          ...(Array.isArray(result.sources) && result.sources.length > 0 ? { sources: result.sources } : {}),
+          ...contextUsageProperty,
+        }
       : {
           role: 'assistant',
           content: `I couldn't complete that request: ${result.error}`,
+          ...contextUsageProperty,
         });
   }
 
@@ -1214,9 +2118,26 @@ async function handleRequestResult(result) {
       showActivity({ kind: 'error', message: `The response finished but could not be saved: ${error.message}` });
     }
   }
+  if (retrievedDocumentsChanged || contextUsage.length > 0) {
+    try {
+      const listing = await api.listCachedDocuments(session.id);
+      if (activeSessionId === session.id) {
+        libraryLoadedSessionId = session.id;
+        libraryDocuments = listing.references;
+        libraryFiles = listing.files;
+        libraryDocumentCount = listing.documentCount;
+        libraryUnindexedCount = listing.unindexedCount;
+        renderDocumentLibraryTabs(session.id);
+      }
+    } catch (error) {
+      showActivity({ kind: 'error', message: `The response finished, but retrieved files could not be listed: ${error.message}` });
+    }
+  }
   if (activeSessionId === session.id) {
     renderSession(session);
-    messages.scrollTop = messages.scrollHeight;
+    messages.scrollTop = shouldAutoScroll
+      ? messages.scrollHeight
+      : preservedScrollTop(previousScrollTop, messages.scrollHeight, messages.clientHeight);
   } else {
     renderSessions();
   }
@@ -1233,15 +2154,32 @@ function handleRequestChunk({ requestId, sessionId, chunk }) {
   const state = requestState(sessionId);
   if (!state || state.requestId !== requestId || typeof chunk !== 'string' || !chunk) return;
   state.answer += chunk;
+  const preview = [...$('session-list').children]
+    .find((item) => item.dataset.sessionId === sessionId)
+    ?.querySelector('.session-preview');
+  if (preview) preview.textContent = 'Typing…';
   if (activeSessionId !== sessionId || state.renderScheduled) return;
   state.renderScheduled = true;
-  requestAnimationFrame(() => {
+  window.setTimeout(() => {
     state.renderScheduled = false;
     if (requestState(sessionId) === state && activeSessionId === sessionId) {
-      renderSession(activeSession());
+      const previousScrollTop = messages.scrollTop;
+      const wrapper = messages.querySelector('.message-pending');
+      let content = wrapper?.querySelector('.message-content');
+      if (wrapper && !content) {
+        content = document.createElement('div');
+        content.className = 'message-content';
+        wrapper.querySelector('.typing-indicator')?.remove();
+        wrapper.removeAttribute('role');
+        wrapper.append(content);
+      }
+      if (content) content.innerHTML = renderMarkdown(state.answer, { renderMath: false });
+      messages.scrollTop = state.autoScroll === false
+        ? preservedScrollTop(previousScrollTop, messages.scrollHeight, messages.clientHeight)
+        : messages.scrollHeight;
       updateLimitMeters();
     }
-  });
+  }, 100);
 }
 
 async function cancelCurrentRequest() {
@@ -1277,6 +2215,10 @@ $('composer').addEventListener('submit', (event) => {
   const question = prompt.value.trim();
   if (question) void ask(question);
 });
+messages.addEventListener('scroll', () => {
+  const state = requestState(activeSessionId);
+  if (state) state.autoScroll = isNearScrollBottom(messages);
+});
 $('question').addEventListener('input', updateLimitMeters);
 $('cancel').addEventListener('click', () => void cancelCurrentRequest());
 prompt.addEventListener('keydown', (event) => {
@@ -1305,6 +2247,15 @@ function openSettings() {
 $('settings-button').addEventListener('click', openSettings);
 api.onOpenSettings(openSettings);
 $('settings-close').addEventListener('click', () => settingsDialog.close());
+$('document-viewer-close').addEventListener('click', () => documentViewerDialog.close());
+$('activity-clear').addEventListener('click', () => showActivity({ kind: 'complete', message: '' }));
+removeDocumentDialog.addEventListener('close', () => {
+  const removal = pendingDocumentRemoval;
+  pendingDocumentRemoval = null;
+  if (removal && removeDocumentDialog.returnValue === 'remove') {
+    void removeLibraryDocument(removal.sessionId, removal.referenceId, removal.name);
+  }
+});
 $('context-window-select').addEventListener('change', async (event) => {
   const select = event.currentTarget;
   const selectedContextWindowTokens = Number(select.value);
@@ -1343,6 +2294,22 @@ $('info-toggle').addEventListener('click', () => {
   else closeInfoPanel();
 });
 $('info-close').addEventListener('click', closeInfoPanel);
+$('add-document-source').addEventListener('click', () => {
+  const menu = $('composer-document-menu');
+  const open = menu.hidden;
+  menu.hidden = !open;
+  $('add-document-source').setAttribute('aria-expanded', String(open));
+});
+$('composer-document-menu').addEventListener('click', (event) => {
+  const button = event.target.closest('[data-composer-document-add]');
+  if (!button) return;
+  const menu = $('composer-document-menu');
+  menu.hidden = true;
+  $('add-document-source').setAttribute('aria-expanded', 'false');
+  const sessionId = activeSessionId;
+  if (button.dataset.composerDocumentAdd === 'files') void importDocuments(sessionId);
+  else if (button.dataset.composerDocumentAdd === 'folder') void addDocumentFolder(sessionId);
+});
 $('info-add-tab').addEventListener('click', () => {
   const menu = $('info-add-menu');
   const open = menu.hidden;
@@ -1354,11 +2321,16 @@ $('info-add-menu').addEventListener('click', (event) => {
   if (!button) return;
   $('info-add-menu').hidden = true;
   $('info-add-tab').setAttribute('aria-expanded', 'false');
-  if (button.dataset.addInfoTab === 'terminal' && activeSessionId) {
-    void addTerminalTab(activeSessionId);
-  }
+  if (button.dataset.addInfoTab === 'documents') openDocumentLibraryTab();
+  else if (button.dataset.addInfoTab === 'terminal' && activeSessionId) void addTerminalTab(activeSessionId);
 });
 document.addEventListener('click', (event) => {
+  for (const menu of document.querySelectorAll('.document-add-menu:not([hidden])')) {
+    const wrap = menu.closest('.document-add-wrap');
+    if (menu.contains(event.target) || wrap?.contains(event.target)) continue;
+    menu.hidden = true;
+    wrap?.querySelector('.document-add-button')?.setAttribute('aria-expanded', 'false');
+  }
   if ($('info-add-menu').hidden || $('info-add-menu').contains(event.target)
     || $('info-add-tab').contains(event.target)) return;
   $('info-add-menu').hidden = true;
@@ -1390,6 +2362,9 @@ api.onTerminalExit(({ terminalId, exitCode }) => {
 });
 api.onTerminalCommandRequest((request) => {
   void handleTerminalCommandRequest(request);
+});
+api.onDocumentEditRequest((request) => {
+  void handleDocumentEditRequest(request);
 });
 $('setup-later').addEventListener('click', () => setupDialog.close());
 $('setup-start').addEventListener('click', () => setupDialog.close());

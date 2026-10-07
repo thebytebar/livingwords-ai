@@ -218,5 +218,8 @@ export function createTerminalManager({
     closeAll() {
       for (const terminalId of terminals.keys()) closeTerminal(terminalId);
     },
+    get activeCount() {
+      return terminals.size;
+    },
   });
 }

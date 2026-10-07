@@ -7,10 +7,11 @@ Use it without an account, subscription, or per-prompt cloud fees. You provide t
 ## What you can do
 
 - Ask questions, explore ideas, draft and revise writing, summarize, and plan.
+- Reference code, configuration, and other text files or text-based PDFs per conversation, search folder contents locally, open citations in the document viewer, and approve proposed text-file edits from a diff.
 - Get help with software tasks and use the built-in terminal. The app shows assistant-proposed commands and requires your approval before they run.
 - Keep conversations and their context on your device; inference runs locally.
 
-LivingWords is a general-purpose assistant with a Christian persona informed by historic Trinitarian Christianity and the Bible. That perspective informs answers about faith, theology, and ethics, but is not forced into unrelated factual, creative, or technical answers. Its answers can be wrong and should be checked when accuracy matters. The current app does not import documents or search external knowledge collections, and assistant responses have a bounded length.
+LivingWords is a general-purpose assistant with a Christian persona informed by historic Trinitarian Christianity and the Bible. That perspective informs answers about faith, theology, and ethics, but is not forced into unrelated factual, creative, or technical answers. Its answers can be wrong and should be checked when accuracy matters. Document references, extracted text, and retrieval stay on this device; originals remain in place. Assistant-proposed edits to attached text files require approval, and PDFs are read-only. Scanned PDFs and OCR are not supported, and assistant responses have a bounded length.
 
 ## Quick start
 
