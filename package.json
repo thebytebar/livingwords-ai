@@ -8,8 +8,8 @@
   "scripts": {
     "build": "node scripts/build.mjs",
     "dev": "npm run build && electron-rebuild --force --only node-pty && node scripts/brand-electron-macos.mjs && node scripts/launch-electron.mjs electron/main.mjs",
-    "pack": "npm run build && node scripts/check-sidecar.mjs && electron-builder --dir",
-    "deploy": "npm run build && node scripts/check-sidecar.mjs && electron-builder --publish never",
+    "pack": "npm run build && electron-rebuild --force --only node-pty && node scripts/check-sidecar.mjs && electron-builder --dir",
+    "deploy": "npm run build && electron-rebuild --force --only node-pty && node scripts/check-sidecar.mjs && electron-builder --publish never",
     "test": "tsx --test src/core/assistant.test.ts && node --test desktop/chat-scroll.test.mjs desktop/document-diff.test.mjs desktop/folder-context.test.mjs desktop/panel-layout.test.mjs desktop/terminal-context.test.mjs desktop/terminal-readiness.test.mjs desktop/terminal-theme.test.mjs electron/chat-completion-stream.test.mjs electron/context-settings-store.test.mjs electron/context-window.test.mjs electron/conversation-store.test.mjs electron/document-library.test.mjs electron/pdf-text.test.mjs electron/inactivity-timeout.test.mjs electron/model-manager.test.mjs electron/request-queue.test.mjs electron/terminal-manager.test.mjs electron/trusted-renderer.test.mjs scripts/download-desktop-model.test.mjs",
     "postinstall": "node node_modules/electron/install.js && node scripts/install-desktop-model.mjs",
     "prepare": "npm run build"
@@ -61,6 +61,7 @@
     "appId": "com.thebytebar.livingwords",
     "productName": "LivingWords AI",
     "asar": true,
+    "npmRebuild": false,
     "directories": {
       "output": "release"
     },
