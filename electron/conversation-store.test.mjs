@@ -5,6 +5,32 @@ import { join } from 'node:path';
 import test from 'node:test';
 import { createConversationStore } from './conversation-store.mjs';
 
+function exampleTrace() {
+  const timestamp = new Date().toISOString();
+  return {
+    schema_version: 1,
+    run_id: 'test-run',
+    task: 'Explain hope.',
+    started_at: timestamp,
+    completed_at: timestamp,
+    steps: [{
+      step_number: 1,
+      timestamp,
+      thought: 'Answer from the available context.',
+      tool_calls: null,
+      observation: null,
+      error: null,
+      status: 'complete',
+      token_usage: { input_tokens: 10, output_tokens: 6, total_tokens: 16 },
+      latency_ms: 125,
+      guardrail_decisions: [],
+      verification: [],
+      final_answer: 'Hope is a confident expectation.',
+      context_compaction: null,
+    }],
+  };
+}
+
 test('local conversation store creates, persists, and updates conversations', async () => {
   const directory = await mkdtemp(join(tmpdir(), 'livingwords-conversations-'));
   const filePath = join(directory, 'app-data', 'conversations.json');
@@ -77,6 +103,213 @@ test('local conversation store persists selected documents and verified citation
   }
 });
 
+test('local conversation store persists validated bounded traces with assistant responses', async () => {
+  const directory = await mkdtemp(join(tmpdir(), 'livingwords-conversations-traces-'));
+  const filePath = join(directory, 'conversations.json');
+  const store = createConversationStore(filePath);
+
+  try {
+    const session = await store.create();
+    const trace = exampleTrace();
+    const updated = {
+      ...session,
+      messages: [{
+        role: 'assistant',
+        content: 'Hope is a confident expectation.',
+        generationDurationMs: 4_250,
+        trace,
+      }],
+    };
+    await store.save(updated);
+    assert.deepEqual(await createConversationStore(filePath).get(session.id), updated);
+    assert.deepEqual(JSON.parse(await readFile(filePath, 'utf8'))[0].messages[0].trace, trace);
+    assert.equal(JSON.parse(await readFile(filePath, 'utf8'))[0].messages[0].generationDurationMs, 4_250);
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
+test('local conversation store persists tool lifecycle records in chronological order', async () => {
+  const directory = await mkdtemp(join(tmpdir(), 'livingwords-conversations-tool-events-'));
+  const filePath = join(directory, 'conversations.json');
+  const store = createConversationStore(filePath);
+
+  try {
+    const session = await store.create();
+    const timestamp = new Date().toISOString();
+    const trace = {
+      ...exampleTrace(),
+      steps: [{
+        ...exampleTrace().steps[0],
+        tool_events: [
+          {
+            step_number: 1,
+            call_index: 0,
+            tool_name: 'read_file',
+            timestamp,
+            arguments: { path: 'src/app.ts' },
+            status: 'pending',
+          },
+          {
+            step_number: 1,
+            call_index: 0,
+            tool_name: 'read_file',
+            timestamp,
+            arguments: null,
+            status: 'running',
+          },
+          {
+            step_number: 1,
+            call_index: 0,
+            tool_name: 'read_file',
+            timestamp,
+            arguments: null,
+            status: 'success',
+          },
+        ],
+      }],
+    };
+    const updated = {
+      ...session,
+      messages: [{ role: 'assistant', content: 'I read the file.', trace }],
+    };
+
+    await store.save(updated);
+    const restored = await createConversationStore(filePath).get(session.id);
+    assert.deepEqual(restored.messages[0].trace.steps[0].tool_events, trace.steps[0].tool_events);
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
+test('local conversation store rejects invalid or oversized traces without breaking existing messages', async () => {
+  const directory = await mkdtemp(join(tmpdir(), 'livingwords-conversations-invalid-traces-'));
+  const store = createConversationStore(join(directory, 'conversations.json'));
+
+  try {
+    const session = await store.create();
+    await assert.rejects(
+      store.save({
+        ...session,
+        messages: [{ role: 'assistant', content: 'Nope.', trace: { ...exampleTrace(), schema_version: 2 } }],
+      }),
+      /invalid agent trace/u,
+    );
+    await assert.rejects(
+      store.save({
+        ...session,
+        messages: [{
+          role: 'assistant',
+          content: 'Nope.',
+          trace: {
+            ...exampleTrace(),
+            steps: [{
+              ...exampleTrace().steps[0],
+              tool_events: [{
+                step_number: 1,
+                call_index: -1,
+                tool_name: 'read_file',
+                timestamp: new Date().toISOString(),
+                arguments: null,
+                status: 'running',
+              }],
+            }],
+          },
+        }],
+      }),
+      /invalid tool event/u,
+    );
+    await assert.rejects(
+      store.save({
+        ...session,
+        messages: [{
+          role: 'assistant',
+          content: 'Nope.',
+          trace: {
+            ...exampleTrace(),
+            steps: Array.from({ length: 21 }, (_, index) => ({
+              ...exampleTrace().steps[0],
+              step_number: index + 1,
+            })),
+          },
+        }],
+      }),
+      /invalid agent trace/u,
+    );
+    await assert.rejects(
+      store.save({
+        ...session,
+        messages: [{
+          role: 'assistant',
+          content: 'Too large.',
+          trace: {
+            ...exampleTrace(),
+            steps: Array.from({ length: 20 }, (_, index) => ({
+              ...exampleTrace().steps[0],
+              step_number: index + 1,
+              thought: 'x'.repeat(12_000),
+              final_answer: 'y'.repeat(24_000),
+              tool_calls: Array.from({ length: 3 }, () => ({
+                name: 'read_file',
+                arguments: { path: 'src/example.ts' },
+              })),
+              observation: Array.from({ length: 3 }, () => ({
+                name: 'read_file',
+                status: 'success',
+                result: { excerpt: 'z'.repeat(8_000) },
+              })),
+            })),
+          },
+        }],
+      }),
+      /exceeds the local storage limit/u,
+    );
+    assert.deepEqual((await store.get(session.id)).messages, []);
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
+test('local conversation store persists traces containing repeated file-read results', async () => {
+  const directory = await mkdtemp(join(tmpdir(), 'livingwords-conversations-read-traces-'));
+  const filePath = join(directory, 'conversations.json');
+  const store = createConversationStore(filePath);
+
+  try {
+    const session = await store.create();
+    const trace = {
+      ...exampleTrace(),
+      steps: Array.from({ length: 20 }, (_, stepIndex) => ({
+        ...exampleTrace().steps[0],
+        step_number: stepIndex + 1,
+        thought: `Reviewing files for step ${stepIndex + 1}.`,
+        tool_calls: Array.from({ length: 3 }, (_, callIndex) => ({
+          name: 'read_file',
+          arguments: { path: `src/example-${stepIndex}-${callIndex}.ts` },
+        })),
+        observation: Array.from({ length: 3 }, (_, callIndex) => ({
+          name: 'read_file',
+          status: 'success',
+          result: { excerpt: 'x'.repeat(5_000) },
+        })),
+        final_answer: null,
+      })),
+    };
+
+    await store.save({
+      ...session,
+      messages: [{ role: 'assistant', content: 'Reviewed the project files.', trace }],
+    });
+
+    const restored = await createConversationStore(filePath).get(session.id);
+    assert.equal(restored.messages[0].trace.steps.length, 20);
+    assert.equal(restored.messages[0].trace.steps[0].observation[0].result.excerpt.length, 5_000);
+    assert.equal(restored.messages[0].trace.steps[19].observation[2].result.excerpt.length, 5_000);
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
 test('local conversation store persists retrieved folder files and prunes them when detached', async () => {
   const directory = await mkdtemp(join(tmpdir(), 'livingwords-conversations-retrieved-'));
   const store = createConversationStore(join(directory, 'conversations.json'));
@@ -103,6 +336,13 @@ test('local conversation store persists retrieved folder files and prunes them w
           excerpt: 'Project overview.',
           truncated: false,
         }, {
+          documentId: fileId,
+          name: 'README.md',
+          method: 'folder-overview',
+          page: null,
+          excerpt: 'An automatically selected project overview passage.',
+          truncated: false,
+        }, {
           documentId: otherFileId,
           name: 'src/main.ts',
           method: 'folder-grep',
@@ -116,7 +356,16 @@ test('local conversation store persists retrieved folder files and prunes them w
     });
     const restoredBeforeRemoval = await createConversationStore(join(directory, 'conversations.json')).get(session.id);
     assert.deepEqual(restoredBeforeRemoval.retrievedDocumentIds, [fileId, otherFileId]);
-    assert.deepEqual(restoredBeforeRemoval.messages[0].contextUsage.map(({ documentId }) => documentId), [fileId, otherFileId]);
+    assert.deepEqual(restoredBeforeRemoval.messages[0].contextUsage.map(({ method }) => method), [
+      'folder-read',
+      'folder-overview',
+      'folder-grep',
+    ]);
+    assert.deepEqual(restoredBeforeRemoval.messages[0].contextUsage.map(({ documentId }) => documentId), [
+      fileId,
+      fileId,
+      otherFileId,
+    ]);
 
     await store.removeDocumentSelection(referenceId, session.id, [otherFileId]);
     const restored = await store.get(session.id);
@@ -354,6 +603,17 @@ test('local conversation store validates writes and requires an existing convers
     await assert.rejects(store.save({ id: 'missing' }), /data is invalid/u);
     const created = await store.create();
     await assert.rejects(store.save({ ...created, id: 'unknown' }), /does not exist/u);
+    await assert.rejects(
+      store.save({
+        ...created,
+        messages: [{
+          role: 'assistant',
+          content: 'Invalid duration.',
+          generationDurationMs: -1,
+        }],
+      }),
+      /generation duration/u,
+    );
   } finally {
     await rm(directory, { recursive: true, force: true });
   }

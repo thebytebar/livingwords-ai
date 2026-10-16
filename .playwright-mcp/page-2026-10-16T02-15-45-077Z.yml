@@ -1,0 +1,287 @@
+- generic [ref=f1e3]:
+  - link "Skip to content" [ref=f1e4] [cursor=pointer]:
+    - /url: "#main"
+  - banner [ref=f1e5]:
+    - generic [ref=f1e11]:
+      - text: Checkout Our Latest Project
+      - link [ref=f1e12] [cursor=pointer]:
+        - /url: /projects/livingwords-ai/
+        - strong [ref=f1e13]: LivingWords AI
+      - text: "!"
+    - generic [ref=f1e16]:
+      - generic [ref=f1e18]:
+        - link [ref=f1e19] [cursor=pointer]:
+          - /url: https://thebytebar.com/
+          - img "The Byte Bar Co" [ref=f1e20]
+        - heading [level=1] [ref=f1e21]:
+          - link "The Byte Bar Co" [ref=f1e22] [cursor=pointer]:
+            - /url: https://thebytebar.com/
+        - paragraph [ref=f1e23]: Quality Engineering
+      - navigation [ref=f1e24]:
+        - list [ref=f1e25]:
+          - listitem [ref=f1e26]:
+            - link "Home" [ref=f1e27] [cursor=pointer]:
+              - /url: https://thebytebar.com/
+          - listitem [ref=f1e29]:
+            - link "Projects" [ref=f1e30] [cursor=pointer]:
+              - /url: https://thebytebar.com/projects/
+          - listitem [ref=f1e32]:
+            - link "AI" [ref=f1e33] [cursor=pointer]:
+              - /url: https://thebytebar.com/projects/livingwords-ai/
+          - listitem [ref=f1e35]:
+            - link "News" [ref=f1e36] [cursor=pointer]:
+              - /url: https://thebytebar.com/news/
+          - listitem [ref=f1e38]:
+            - link "Contact Us" [ref=f1e39] [cursor=pointer]:
+              - /url: https://thebytebar.com/contact-us/
+          - listitem [ref=f1e41]:
+            - link "Donate" [ref=f1e42] [cursor=pointer]:
+              - /url: https://thebytebar.com/donate/
+      - generic [ref=f1e44]:
+        - navigation [ref=f1e47]:
+          - list [ref=f1e48]:
+            - listitem [ref=f1e49]:
+              - link "https://www.facebook.com/" [ref=f1e50] [cursor=pointer]:
+                - /url: https://www.facebook.com/
+            - listitem [ref=f1e56]:
+              - link "https://twitter.com/" [ref=f1e57] [cursor=pointer]:
+                - /url: https://twitter.com/
+            - listitem [ref=f1e63]:
+              - link "https://t.me/" [ref=f1e64] [cursor=pointer]:
+                - /url: https://t.me/
+            - listitem [ref=f1e70]:
+              - link "https://www.instagram.com/" [ref=f1e71] [cursor=pointer]:
+                - /url: https://www.instagram.com/
+            - listitem [ref=f1e77]:
+              - link "https://youtube.com/" [ref=f1e78] [cursor=pointer]:
+                - /url: https://youtube.com/
+        - button "Toggle Dark Mode" [ref=f1e86] [cursor=pointer]
+        - button "Open search popup" [ref=f1e95] [cursor=pointer]
+  - generic [ref=f1e104]:
+    - generic [ref=f1e105]: Latest News
+    - generic [ref=f1e110]:
+      - generic [ref=f1e111]:
+        - generic [ref=f1e112]:
+          - generic [ref=f1e113]: October 15, 2026
+          - link "LivingWords AI 0.2.0 Release Coming Soon" [ref=f1e115] [cursor=pointer]:
+            - /url: https://thebytebar.com/news/2026/10/15/livingwords-ai-0-2-0-release-coming-soon/
+        - generic [ref=f1e116]:
+          - link [ref=f1e118] [cursor=pointer]:
+            - /url: https://thebytebar.com/news/2026/06/05/recent-updates-to-the-cttaf-benchmark-refining-a-key-tool-for-theological-ai-alignment/
+          - generic [ref=f1e119]: June 5, 2026
+          - 'link "Recent Updates to the CTTAF Benchmark: Refining a Key Tool for Theological AI Alignment" [ref=f1e121] [cursor=pointer]':
+            - /url: https://thebytebar.com/news/2026/06/05/recent-updates-to-the-cttaf-benchmark-refining-a-key-tool-for-theological-ai-alignment/
+        - generic [ref=f1e122]:
+          - generic [ref=f1e123]: May 29, 2026
+          - link "Exciting News from The Living Words Project" [ref=f1e125] [cursor=pointer]:
+            - /url: https://thebytebar.com/news/2026/05/29/exciting-news-from-the-living-words-project/
+        - generic [ref=f1e126]:
+          - link [ref=f1e128] [cursor=pointer]:
+            - /url: https://thebytebar.com/news/2026/05/26/exciting-news-public-author-profiles-are-now-live-on-thelivingwordsproject-com/
+          - generic [ref=f1e129]: May 26, 2026
+          - 'link "Exciting News: Public Author Profiles Are Now Live on TheLivingWordsProject.com!" [ref=f1e131] [cursor=pointer]':
+            - /url: https://thebytebar.com/news/2026/05/26/exciting-news-public-author-profiles-are-now-live-on-thelivingwordsproject-com/
+        - generic [ref=f1e132]:
+          - link [ref=f1e134] [cursor=pointer]:
+            - /url: https://thebytebar.com/news/2026/05/18/introducing-byte-sermons-free-open-source-sermon-management-for-any-wordpress-church-site/
+          - generic [ref=f1e135]: May 18, 2026
+          - 'link "Introducing Byte Sermons: Free Open-Source Sermon Management for Any WordPress Church Site" [ref=f1e137] [cursor=pointer]':
+            - /url: https://thebytebar.com/news/2026/05/18/introducing-byte-sermons-free-open-source-sermon-management-for-any-wordpress-church-site/
+        - generic [ref=f1e138]:
+          - link [ref=f1e140] [cursor=pointer]:
+            - /url: https://thebytebar.com/news/2026/05/08/exciting-news-major-upgrade-to-the-living-words-project-a-powerful-new-bible-study-creators-platform/
+          - generic [ref=f1e141]: May 8, 2026
+          - 'link "Exciting News: Major Upgrade to The Living Words Project – A Powerful New Bible Study Creators Platform!" [ref=f1e143] [cursor=pointer]':
+            - /url: https://thebytebar.com/news/2026/05/08/exciting-news-major-upgrade-to-the-living-words-project-a-powerful-new-bible-study-creators-platform/
+        - generic [ref=f1e144]:
+          - link [ref=f1e146] [cursor=pointer]:
+            - /url: https://thebytebar.com/news/2026/04/24/announcing-the-cttaf-benchmark-evaluating-ai-alignment-with-christian-theological-values/
+          - generic [ref=f1e147]: April 24, 2026
+          - 'link "Announcing the CTTAF Benchmark: Evaluating AI Alignment with Christian Theological Values" [ref=f1e149] [cursor=pointer]':
+            - /url: https://thebytebar.com/news/2026/04/24/announcing-the-cttaf-benchmark-evaluating-ai-alignment-with-christian-theological-values/
+        - generic [ref=f1e150]:
+          - link [ref=f1e152] [cursor=pointer]:
+            - /url: https://thebytebar.com/news/2026/04/21/byte-sermons-wordpress-plugin-is-now-live-on-the-official-wordpress-plugin-directory/
+            - img "Byte Sermons Wordpress Plugin Screenshot" [ref=f1e153]
+          - generic [ref=f1e154]: April 21, 2026
+          - link "Byte Sermons WordPress Plugin is Now Live on the Official WordPress Plugin Directory!" [ref=f1e156] [cursor=pointer]:
+            - /url: https://thebytebar.com/news/2026/04/21/byte-sermons-wordpress-plugin-is-now-live-on-the-official-wordpress-plugin-directory/
+        - generic [ref=f1e157]:
+          - link [ref=f1e159] [cursor=pointer]:
+            - /url: https://thebytebar.com/news/2026/04/04/the-byte-bar-co-is-excited-to-announce-the-launch-of-topchristiansermons-com/
+            - img "TopChristianSermons.com Screenshot" [ref=f1e160]
+          - generic [ref=f1e161]: April 4, 2026
+          - link "The Byte Bar Co. is Excited to Announce the Launch of TopChristianSermons.com!" [ref=f1e163] [cursor=pointer]:
+            - /url: https://thebytebar.com/news/2026/04/04/the-byte-bar-co-is-excited-to-announce-the-launch-of-topchristiansermons-com/
+        - generic [ref=f1e164]:
+          - link [ref=f1e166] [cursor=pointer]:
+            - /url: https://thebytebar.com/news/2026/03/27/designing-a-wordpress-website-faster-how-wp-cli-github-copilot-became-my-go-to-workflow/
+          - generic [ref=f1e167]: March 27, 2026
+          - 'link "Designing a WordPress Website Faster: How WP-CLI + GitHub Copilot Became My Go-To Workflow" [ref=f1e169] [cursor=pointer]':
+            - /url: https://thebytebar.com/news/2026/03/27/designing-a-wordpress-website-faster-how-wp-cli-github-copilot-became-my-go-to-workflow/
+        - generic [ref=f1e170]:
+          - link [ref=f1e172] [cursor=pointer]:
+            - /url: https://thebytebar.com/news/2025/11/03/announcing-the-living-words-project/
+            - img "The Living Words Project Website" [ref=f1e173]
+          - generic [ref=f1e174]: November 3, 2025
+          - link "Announcing TheLivingWordsProject.com" [ref=f1e176] [cursor=pointer]:
+            - /url: https://thebytebar.com/news/2025/11/03/announcing-the-living-words-project/
+        - generic [ref=f1e177]:
+          - link [ref=f1e179] [cursor=pointer]:
+            - /url: https://thebytebar.com/news/2020/01/20/creating-a-php-reverse-proxy/
+          - generic [ref=f1e180]: January 20, 2020
+          - link "Creating a PHP Reverse Proxy" [ref=f1e182] [cursor=pointer]:
+            - /url: https://thebytebar.com/news/2020/01/20/creating-a-php-reverse-proxy/
+        - generic [ref=f1e183]:
+          - link [ref=f1e185] [cursor=pointer]:
+            - /url: https://thebytebar.com/news/2018/01/18/functional-programming-not-the-next-great-software-programming-paradigm/
+          - generic [ref=f1e186]: January 18, 2018
+          - link "Functional Programming Not The Next Great Software Programming Paradigm" [ref=f1e188] [cursor=pointer]:
+            - /url: https://thebytebar.com/news/2018/01/18/functional-programming-not-the-next-great-software-programming-paradigm/
+      - generic [ref=f1e189]:
+        - generic [ref=f1e190]:
+          - generic [ref=f1e191]: October 15, 2026
+          - link "LivingWords AI 0.2.0 Release Coming Soon" [ref=f1e193] [cursor=pointer]:
+            - /url: https://thebytebar.com/news/2026/10/15/livingwords-ai-0-2-0-release-coming-soon/
+        - generic [ref=f1e194]:
+          - link [ref=f1e196] [cursor=pointer]:
+            - /url: https://thebytebar.com/news/2026/06/05/recent-updates-to-the-cttaf-benchmark-refining-a-key-tool-for-theological-ai-alignment/
+          - generic [ref=f1e197]: June 5, 2026
+          - 'link "Recent Updates to the CTTAF Benchmark: Refining a Key Tool for Theological AI Alignment" [ref=f1e199] [cursor=pointer]':
+            - /url: https://thebytebar.com/news/2026/06/05/recent-updates-to-the-cttaf-benchmark-refining-a-key-tool-for-theological-ai-alignment/
+        - generic [ref=f1e200]:
+          - generic [ref=f1e201]: May 29, 2026
+          - link "Exciting News from The Living Words Project" [ref=f1e203] [cursor=pointer]:
+            - /url: https://thebytebar.com/news/2026/05/29/exciting-news-from-the-living-words-project/
+        - generic [ref=f1e204]:
+          - link [ref=f1e206] [cursor=pointer]:
+            - /url: https://thebytebar.com/news/2026/05/26/exciting-news-public-author-profiles-are-now-live-on-thelivingwordsproject-com/
+          - generic [ref=f1e207]: May 26, 2026
+          - 'link "Exciting News: Public Author Profiles Are Now Live on TheLivingWordsProject.com!" [ref=f1e209] [cursor=pointer]':
+            - /url: https://thebytebar.com/news/2026/05/26/exciting-news-public-author-profiles-are-now-live-on-thelivingwordsproject-com/
+        - generic [ref=f1e210]:
+          - link [ref=f1e212] [cursor=pointer]:
+            - /url: https://thebytebar.com/news/2026/05/18/introducing-byte-sermons-free-open-source-sermon-management-for-any-wordpress-church-site/
+          - generic [ref=f1e213]: May 18, 2026
+          - 'link "Introducing Byte Sermons: Free Open-Source Sermon Management for Any WordPress Church Site" [ref=f1e215] [cursor=pointer]':
+            - /url: https://thebytebar.com/news/2026/05/18/introducing-byte-sermons-free-open-source-sermon-management-for-any-wordpress-church-site/
+        - generic [ref=f1e216]:
+          - link [ref=f1e218] [cursor=pointer]:
+            - /url: https://thebytebar.com/news/2026/05/08/exciting-news-major-upgrade-to-the-living-words-project-a-powerful-new-bible-study-creators-platform/
+          - generic [ref=f1e219]: May 8, 2026
+          - 'link "Exciting News: Major Upgrade to The Living Words Project – A Powerful New Bible Study Creators Platform!" [ref=f1e221] [cursor=pointer]':
+            - /url: https://thebytebar.com/news/2026/05/08/exciting-news-major-upgrade-to-the-living-words-project-a-powerful-new-bible-study-creators-platform/
+        - generic [ref=f1e222]:
+          - link [ref=f1e224] [cursor=pointer]:
+            - /url: https://thebytebar.com/news/2026/04/24/announcing-the-cttaf-benchmark-evaluating-ai-alignment-with-christian-theological-values/
+          - generic [ref=f1e225]: April 24, 2026
+          - 'link "Announcing the CTTAF Benchmark: Evaluating AI Alignment with Christian Theological Values" [ref=f1e227] [cursor=pointer]':
+            - /url: https://thebytebar.com/news/2026/04/24/announcing-the-cttaf-benchmark-evaluating-ai-alignment-with-christian-theological-values/
+        - generic [ref=f1e228]:
+          - link [ref=f1e230] [cursor=pointer]:
+            - /url: https://thebytebar.com/news/2026/04/21/byte-sermons-wordpress-plugin-is-now-live-on-the-official-wordpress-plugin-directory/
+            - img "Byte Sermons Wordpress Plugin Screenshot" [ref=f1e231]
+          - generic [ref=f1e232]: April 21, 2026
+          - link "Byte Sermons WordPress Plugin is Now Live on the Official WordPress Plugin Directory!" [ref=f1e234] [cursor=pointer]:
+            - /url: https://thebytebar.com/news/2026/04/21/byte-sermons-wordpress-plugin-is-now-live-on-the-official-wordpress-plugin-directory/
+        - generic [ref=f1e235]:
+          - link [ref=f1e237] [cursor=pointer]:
+            - /url: https://thebytebar.com/news/2026/04/04/the-byte-bar-co-is-excited-to-announce-the-launch-of-topchristiansermons-com/
+            - img "TopChristianSermons.com Screenshot" [ref=f1e238]
+          - generic [ref=f1e239]: April 4, 2026
+          - link "The Byte Bar Co. is Excited to Announce the Launch of TopChristianSermons.com!" [ref=f1e241] [cursor=pointer]:
+            - /url: https://thebytebar.com/news/2026/04/04/the-byte-bar-co-is-excited-to-announce-the-launch-of-topchristiansermons-com/
+        - generic [ref=f1e242]:
+          - link [ref=f1e244] [cursor=pointer]:
+            - /url: https://thebytebar.com/news/2026/03/27/designing-a-wordpress-website-faster-how-wp-cli-github-copilot-became-my-go-to-workflow/
+          - generic [ref=f1e245]: March 27, 2026
+          - 'link "Designing a WordPress Website Faster: How WP-CLI + GitHub Copilot Became My Go-To Workflow" [ref=f1e247] [cursor=pointer]':
+            - /url: https://thebytebar.com/news/2026/03/27/designing-a-wordpress-website-faster-how-wp-cli-github-copilot-became-my-go-to-workflow/
+        - generic [ref=f1e248]:
+          - link [ref=f1e250] [cursor=pointer]:
+            - /url: https://thebytebar.com/news/2025/11/03/announcing-the-living-words-project/
+            - img "The Living Words Project Website" [ref=f1e251]
+          - generic [ref=f1e252]: November 3, 2025
+          - link "Announcing TheLivingWordsProject.com" [ref=f1e254] [cursor=pointer]:
+            - /url: https://thebytebar.com/news/2025/11/03/announcing-the-living-words-project/
+        - generic [ref=f1e255]:
+          - link [ref=f1e257] [cursor=pointer]:
+            - /url: https://thebytebar.com/news/2020/01/20/creating-a-php-reverse-proxy/
+          - generic [ref=f1e258]: January 20, 2020
+          - link "Creating a PHP Reverse Proxy" [ref=f1e260] [cursor=pointer]:
+            - /url: https://thebytebar.com/news/2020/01/20/creating-a-php-reverse-proxy/
+        - generic [ref=f1e261]:
+          - link [ref=f1e263] [cursor=pointer]:
+            - /url: https://thebytebar.com/news/2018/01/18/functional-programming-not-the-next-great-software-programming-paradigm/
+          - generic [ref=f1e264]: January 18, 2018
+          - link "Functional Programming Not The Next Great Software Programming Paradigm" [ref=f1e266] [cursor=pointer]:
+            - /url: https://thebytebar.com/news/2018/01/18/functional-programming-not-the-next-great-software-programming-paradigm/
+  - main [ref=f1e267]:
+    - generic [ref=f1e270]:
+      - generic [ref=f1e274]:
+        - heading "Software that serves the Gospel" [level=1] [ref=f1e275]
+        - paragraph [ref=f1e276]: We build AI and practical tools that help Christians study Scripture, create resources, and share sermons.
+        - generic [ref=f1e277]:
+          - link "Explore LivingWords AI" [ref=f1e279] [cursor=pointer]:
+            - /url: https://thebytebar.com/projects/livingwords-ai/
+          - link "Browse all projects" [ref=f1e281] [cursor=pointer]:
+            - /url: https://thebytebar.com/projects/
+      - generic [ref=f1e282]:
+        - heading "Explore our projects" [level=2] [ref=f1e283]
+        - paragraph [ref=f1e284]: From Bible study to church resources, these tools help Christians learn, serve, and share.
+        - generic [ref=f1e285]:
+          - generic [ref=f1e287]:
+            - heading "TheLivingWordsProject.com" [level=3] [ref=f1e288]
+            - figure [ref=f1e289]:
+              - img "The Living Words Project Bible study platform" [ref=f1e290]
+            - paragraph [ref=f1e291]: A Christian-focused platform for studying Scripture and creating resources for reflection and discipleship.
+            - link "Visit The Living Words Project" [ref=f1e294] [cursor=pointer]:
+              - /url: https://thelivingwordsproject.com
+          - generic [ref=f1e296]:
+            - heading "CTTAF Benchmark" [level=3] [ref=f1e297]
+            - figure [ref=f1e298]:
+              - img "The Christian Theological Triage Alignment Framework benchmark" [ref=f1e299]
+            - paragraph [ref=f1e300]: An open benchmark for evaluating how large language models reason about Christian theology.
+            - link "Explore the CTTAF Benchmark" [ref=f1e303] [cursor=pointer]:
+              - /url: https://github.com/thebytebar/cttaf-benchmark
+        - generic [ref=f1e304]:
+          - generic [ref=f1e306]:
+            - heading "Byte Sermons for WordPress" [level=3] [ref=f1e307]
+            - figure [ref=f1e308]:
+              - img "Byte Sermons sermon management plugin for WordPress" [ref=f1e309]
+            - paragraph [ref=f1e310]: An open-source WordPress plugin that helps churches publish, organize, and share sermons.
+            - link "Explore Byte Sermons" [ref=f1e313] [cursor=pointer]:
+              - /url: https://thebytebar.com/projects/byte-sermons-wordpress-plugin/
+          - generic [ref=f1e315]:
+            - heading "TopChristianSermons.com" [level=3] [ref=f1e316]
+            - figure [ref=f1e317]:
+              - img "TopChristianSermons.com sermon library" [ref=f1e318]
+            - paragraph [ref=f1e319]: A curated library of gospel-centered sermons for believers, pastors, and church leaders.
+            - link "Visit TopChristianSermons.com" [ref=f1e322] [cursor=pointer]:
+              - /url: https://topchristiansermons.com
+      - generic [ref=f1e323]:
+        - heading "Have a project in mind?" [level=3] [ref=f1e324]
+        - paragraph [ref=f1e325]: We’d love to hear what you’re building.
+        - link "Contact us" [ref=f1e328] [cursor=pointer]:
+          - /url: https://thebytebar.com/contact-us/
+      - generic [ref=f1e329]:
+        - heading "Latest News" [level=2] [ref=f1e330]
+        - list [ref=f1e331]:
+          - listitem [ref=f1e332]:
+            - link "LivingWords AI 0.2.0 Release Coming Soon" [ref=f1e333] [cursor=pointer]:
+              - /url: https://thebytebar.com/news/2026/10/15/livingwords-ai-0-2-0-release-coming-soon/
+            - time [ref=f1e334]: October 15, 2026
+          - listitem [ref=f1e335]:
+            - 'link "Recent Updates to the CTTAF Benchmark: Refining a Key Tool for Theological AI Alignment" [ref=f1e336] [cursor=pointer]':
+              - /url: https://thebytebar.com/news/2026/06/05/recent-updates-to-the-cttaf-benchmark-refining-a-key-tool-for-theological-ai-alignment/
+            - time [ref=f1e337]: June 5, 2026
+          - listitem [ref=f1e338]:
+            - link "Exciting News from The Living Words Project" [ref=f1e339] [cursor=pointer]:
+              - /url: https://thebytebar.com/news/2026/05/29/exciting-news-from-the-living-words-project/
+            - time [ref=f1e340]: May 29, 2026
+        - link "All news" [ref=f1e343] [cursor=pointer]:
+          - /url: https://thebytebar.com/news/
+  - contentinfo [ref=f1e344]:
+    - generic [ref=f1e346]:
+      - figure [ref=f1e350]
+      - generic [ref=f1e354]: Copyright 2026 — The Byte Bar Co. All rights reserved.

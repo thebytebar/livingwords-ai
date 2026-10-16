@@ -12,9 +12,26 @@ import {
   mergeRetrievedDocumentIds,
   usedFolderDocuments,
 } from './folder-context.mjs';
-import { MAX_TERMINAL_CONTEXT_LENGTH, readTerminalContext } from './terminal-context.mjs';
 import { createTerminalReadiness } from './terminal-readiness.mjs';
+import { MAX_TERMINAL_CONTEXT_LENGTH, readTerminalContext } from './terminal-context.mjs';
 import { terminalThemeFromColors } from './terminal-theme.mjs';
+import {
+  canCloseInfoTab,
+  isAgentTrace,
+  latestAgentTrace,
+  traceLiveDecisionActivity,
+  traceStepActivities,
+  traceToolActivity,
+  workflowSelectionActivity,
+  formatDuration,
+  traceDurationMs,
+  updateTraceTab,
+} from './agent-trace.mjs';
+import {
+  pendingIndicatorText,
+  sessionRequestPreviewText,
+  shouldShowTypingAnimation,
+} from './pending-indicator.mjs';
 import {
   DEFAULT_CONTEXT_WINDOW_TOKENS,
   contextWindowPreset,
@@ -34,30 +51,108 @@ const settingsDialog = $('settings-dialog');
 const aboutDialog = $('about-dialog');
 const modelLicenseDialog = $('model-license-dialog');
 const documentViewerDialog = $('document-viewer-dialog');
+const toolDetailsDialog = $('tool-details-dialog');
 const removeDocumentDialog = $('remove-document-dialog');
 const appShell = $('app-shell');
 let contextWindowTokens = DEFAULT_CONTEXT_WINDOW_TOKENS;
 let responseTokenLimit = responseTokenLimitForContext(contextWindowTokens);
 let contextMeterTokens = contextWindowPreset(contextWindowTokens).meterTokens;
-const SYSTEM_PROMPT = 'You are a helpful general-purpose assistant. Answer accurately, be clear, and acknowledge uncertainty when appropriate.';
 const PANEL_WIDTHS = {
   sessions: { key: 'livingwords-sessions-width', fallback: 264 },
   info: { key: 'livingwords-info-width', fallback: 300 },
 };
 const INFO_STATE_KEY_PREFIX = 'livingwords-info-state:';
 const MAX_DOCUMENT_REFERENCES = 100;
-const MAX_DOCUMENT_CONTEXT_CHARS = 12_000;
+const MAX_RIGHT_PANEL_CONTEXT_LENGTH = 32_000;
+const MAX_RIGHT_PANEL_TAB_CONTENT_LENGTH = 8_000;
+const INFO_TAB_ICON_PATHS = Object.freeze({
+  trace: ['M3 12h4l2-6 4 12 2-6h6'],
+  browser: ['M4 5h16v14H4z', 'M4 9h16', 'M7 7h.01', 'M10 7h.01'],
+  documents: ['M6 3.75h7l5 5v11.5H6z', 'M13 3.75v5h5', 'M9 13h6', 'M9 16.5h6'],
+  'web-search': ['M10.8 3.8a7 7 0 1 0 0 14 7 7 0 0 0 0-14Z', 'm16 16 4.2 4.2'],
+  terminal: ['M4 5h16v14H4z', 'm7 9 3 3-3 3', 'M12 15h5'],
+});
+const TOOL_CATALOG = [
+  {
+    id: 'documents',
+    name: 'Files',
+    summary: 'Find answers in files and folders you attach to a conversation.',
+    description: 'LivingWords can search, summarize, and read files or folders that you attach to the current conversation. It can use those sources to answer questions and show where information came from.',
+    icon: ['M6 3.75h7l5 5v11.5H6z', 'M13 3.75v5h5', 'M9 13h6', 'M9 16.5h6'],
+  },
+  {
+    id: 'document-edits',
+    name: 'File edits',
+    summary: 'Review proposed changes to attached text files before they are saved.',
+    description: 'When you ask LivingWords to change an attached text file, it can prepare a proposed file edit and show you exactly what would change. You can review the comparison before deciding whether to apply it.',
+    icon: ['M6 3.75h8l4 4v4.5', 'M14 3.75v4h4', 'M8 12h4', 'M8 15h3', 'm13.5 18.5 5.75-5.75 2 2-5.75 5.75-2.5.5z'],
+  },
+  {
+    id: 'web-research',
+    name: 'Web research',
+    summary: 'Search DuckDuckGo for current information, then read public pages in the app.',
+    description: 'LivingWords is integrated with DuckDuckGo Lite at lite.duckduckgo.com. Search results provided by DuckDuckGo appear in the Web Search tab, and selected result pages open in the Browser tab.',
+    icon: ['M12 20.25a8.25 8.25 0 1 0 0-16.5 8.25 8.25 0 0 0 0 16.5Z', 'M3.9 12h16.2', 'M12 3.75c2.1 2.25 3.15 5 3.15 8.25S14.1 18 12 20.25C9.9 18 8.85 15.25 8.85 12S9.9 6 12 3.75Z', 'm17.8 17.8 3 3'],
+  },
+  {
+    id: 'right-panel-context',
+    name: 'Open tabs',
+    summary: 'Inspect visible content in tabs open in the right panel when it is relevant.',
+    description: 'When a request depends on information in the right panel, LivingWords can list the open tabs and read a selected tab’s visible text from Activity, Files, Web Search, Terminal, or Browser. Browser pages are read live; the other tab content is a bounded snapshot from when the request began. Tab content is treated as untrusted data, and actual file contents are read with the Files tools.',
+    icon: ['M3 4h18v16H3z', 'M14 4v16', 'M6.5 8h4', 'M6.5 11.5h4', 'M17 9.5a2.5 2.5 0 1 0 0 5 2.5 2.5 0 0 0 0-5Z', 'm18.8 13.8 2 2'],
+  },
+  {
+    id: 'calculator',
+    name: 'Calculator',
+    summary: 'Work out arithmetic accurately, without guessing.',
+    description: 'The calculator handles arithmetic, percentages, parentheses, powers, and common math functions. It computes the result directly instead of asking the language model to estimate it.',
+    icon: ['M6 3.75h12v16.5H6z', 'M9 7.5h6', 'M9 12h.01', 'M12 12h.01', 'M15 12h.01', 'M9 15.75h.01', 'M12 15.75h.01', 'M15 15.75h.01'],
+  },
+  {
+    id: 'date-time',
+    name: 'Date & time',
+    summary: 'Check your device’s current local date and time.',
+    description: 'When a request depends on what time it is where you are, LivingWords can check the current date and time from your device, including your configured time zone.',
+    icon: ['M12 20.25a8.25 8.25 0 1 0 0-16.5 8.25 8.25 0 0 0 0 16.5Z', 'M12 7.5v4.75l3 1.75'],
+  },
+  {
+    id: 'save-workflow',
+    name: 'Save workflow',
+    summary: 'Save a completed reusable workflow created through a guided conversation.',
+    description: 'The built-in workflow builder may ask up to two optional clarifying questions, offers feedback and suggestions, and incorporates your answers before drafting. You can answer, skip, or say continue; missing details are not blockers, and the builder will use practical defaults. Its Save workflow action stores the completed workflow locally and opens it in Workflows, where you can edit or delete it.',
+    icon: ['M5 5h5v5H5z', 'M14 5h5v5h-5z', 'M5 14h5v5H5z', 'M14 14h5v5h-5z', 'M10 7.5h4', 'M7.5 10v4', 'M16.5 10v4', 'M10 16.5h4'],
+  },
+  {
+    id: 'terminal',
+    name: 'Terminal',
+    summary: 'Run a command only after you review and approve it.',
+    description: 'For software and computer tasks, LivingWords can ask to run a single command in the conversation’s Terminal. You see the exact command and can approve or decline it before it runs.',
+    icon: ['M4.5 5.25h15v13.5h-15z', 'm7.5 9 2.5 2.25-2.5 2.25', 'M12.5 13.5h3.25'],
+  },
+];
 let assistantAvailable = false;
 let sessions = [];
+let workflows = [];
+let workflowsLoaded = false;
+let workflowsLoading = false;
+let selectedWorkflowId = null;
+let workflowIsNew = false;
+let workflowEditorDirty = false;
+let workflowOrderSaving = false;
+let draggedWorkflowId = null;
+let activeWorkspace = 'sessions';
 let libraryDocuments = [];
 let libraryFiles = [];
 let libraryDocumentCount = 0;
 let libraryUnindexedCount = 0;
 let libraryLoadedSessionId = null;
+let traceDurationTimer = null;
+let browserBoundsFrame = null;
 let activeSessionId = null;
 let responseMeterId = 0;
 const requestStates = new Map();
 const infoSessions = new Map();
+const browserStates = new Map();
 const refreshingDocumentSessions = new Set();
 let pendingDocumentRemoval = null;
 
@@ -135,15 +230,22 @@ function infoState(sessionId = activeSessionId) {
   let state = infoSessions.get(sessionId);
   if (!state) {
     state = restoreInfoState(sessionId);
+    const session = sessions.find((item) => item.id === sessionId);
+    const traceTab = createTraceTab(sessionId, latestAgentTrace(session?.messages));
+    state.tabs.unshift(traceTab);
+    if (!state.selectedId || traceTab.trace) state.selectedId = traceTab.id;
     infoSessions.set(sessionId, state);
-  }
-  const session = sessions.find((item) => item.id === sessionId);
-  if ((session?.selectedDocumentIds ?? []).length > 0
-    && !state.tabs.some((tab) => tab.kind === 'documents')) {
-    const tab = createDocumentTab(sessionId);
-    state.tabs.push(tab);
-    if (!state.selectedId) state.selectedId = tab.id;
-    persistInfoState(sessionId, state);
+  } else {
+    let traceTab = state.tabs.find((tab) => tab.kind === 'trace');
+    if (!traceTab) {
+      const session = sessions.find((item) => item.id === sessionId);
+      traceTab = createTraceTab(sessionId, latestAgentTrace(session?.messages));
+      state.tabs.unshift(traceTab);
+      if (!state.selectedId) state.selectedId = traceTab.id;
+    } else if (!traceTab.recording) {
+      const session = sessions.find((item) => item.id === sessionId);
+      traceTab.trace = latestAgentTrace(session?.messages) ?? traceTab.trace;
+    }
   }
   return state;
 }
@@ -153,9 +255,205 @@ function createDocumentTab(sessionId) {
     id: window.crypto.randomUUID(),
     sessionId,
     kind: 'documents',
-    title: 'Documents',
+    title: 'Files',
     surface: document.createElement('div'),
   };
+}
+
+function createWebSearchTab(sessionId) {
+  return {
+    id: `web-search-${sessionId}`,
+    sessionId,
+    kind: 'web-search',
+    title: 'Web Search',
+    surface: document.createElement('div'),
+    searches: [],
+  };
+}
+
+function createBrowserTab(sessionId, browserTabId = window.crypto.randomUUID(), url = '') {
+  return {
+    id: `browser-${browserTabId}`,
+    browserTabId,
+    sessionId,
+    kind: 'browser',
+    title: browserTitleFromUrl(url),
+    surface: document.createElement('div'),
+  };
+}
+
+function createInfoTabIcon(kind) {
+  const icon = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+  icon.setAttribute('viewBox', '0 0 24 24');
+  icon.setAttribute('aria-hidden', 'true');
+  icon.setAttribute('focusable', 'false');
+  for (const pathData of INFO_TAB_ICON_PATHS[kind] ?? []) {
+    const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+    path.setAttribute('d', pathData);
+    icon.append(path);
+  }
+  return icon;
+}
+
+function browserTitleFromUrl(url) {
+  try {
+    return new URL(url).hostname || 'Browser';
+  } catch {
+    return 'Browser';
+  }
+}
+
+function createTraceTab(sessionId, trace = null) {
+  return {
+    id: `trace-${sessionId}`,
+    sessionId,
+    kind: 'trace',
+    title: 'Activity',
+    surface: document.createElement('div'),
+    trace: isAgentTrace(trace) ? trace : null,
+    recording: false,
+    workflowSelection: null,
+  };
+}
+
+function appendActivity(container, activity) {
+  const isCompleted = activity.completed === true;
+  const item = document.createElement('div');
+  item.className = 'agent-trace-step';
+  if (!isCompleted) item.classList.add('agent-trace-step-pending');
+  const header = document.createElement('div');
+  header.className = 'agent-trace-step-header';
+  const title = document.createElement('span');
+  title.className = 'agent-trace-step-title';
+  title.textContent = activity.title;
+  header.append(title);
+  item.append(header);
+  if (isCompleted && typeof activity.description === 'string' && activity.description) {
+    const description = document.createElement('p');
+    description.className = 'agent-trace-description';
+    description.textContent = activity.description;
+    item.append(description);
+  }
+  container.append(item);
+}
+
+function appendLiveToolActivities(container, calls, events) {
+  for (const call of calls) {
+    appendActivity(container, traceToolActivity(
+      call,
+      events.filter((event) => event.call_index === call.call_index),
+    ));
+  }
+}
+
+function traceDurationElement(className, label, startedAt, completedAt = '') {
+  if (typeof startedAt !== 'string' || !Number.isFinite(Date.parse(startedAt))) return null;
+  const duration = document.createElement('span');
+  duration.className = className;
+  duration.dataset.startedAt = startedAt;
+  if (completedAt && Number.isFinite(Date.parse(completedAt))) {
+    duration.dataset.completedAt = completedAt;
+  }
+  duration.dataset.label = label;
+  refreshTraceDurationElement(duration);
+  return duration;
+}
+
+function refreshTraceDurationElement(element, now = Date.now()) {
+  const start = Date.parse(element.dataset.startedAt);
+  const finish = element.dataset.completedAt ? Date.parse(element.dataset.completedAt) : now;
+  if (!Number.isFinite(start) || !Number.isFinite(finish)) return;
+  const duration = formatDuration(Math.max(0, finish - start));
+  element.textContent = element.dataset.label ? `${element.dataset.label}: ${duration}` : duration;
+}
+
+function refreshTraceDurationTicker() {
+  const recordingTabs = [...infoSessions.values()]
+    .flatMap((state) => state.tabs)
+    .filter((tab) => tab.kind === 'trace' && tab.recording);
+  if (recordingTabs.length === 0) {
+    if (traceDurationTimer !== null) {
+      window.clearInterval(traceDurationTimer);
+      traceDurationTimer = null;
+    }
+    return;
+  }
+  if (traceDurationTimer !== null) return;
+  traceDurationTimer = window.setInterval(() => {
+    const now = Date.now();
+    for (const element of document.querySelectorAll('.agent-trace-duration[data-started-at]')) {
+      refreshTraceDurationElement(element, now);
+    }
+  }, 1_000);
+}
+
+function appendLiveProgress(container, tab) {
+  const calls = tab.liveToolStep?.calls ?? [];
+  const events = tab.liveToolStep?.events ?? [];
+  if (!tab.progress && events.length === 0 && calls.length === 0) return;
+  appendActivity(container, traceLiveDecisionActivity(tab.progress, calls));
+  appendLiveToolActivities(container, calls, events);
+}
+
+function renderTraceSurface(tab) {
+  const surface = tab.surface;
+  const previousSteps = surface.querySelector('.agent-trace-steps');
+  const wasNearBottom = previousSteps ? isNearScrollBottom({
+    scrollHeight: previousSteps.scrollHeight,
+    clientHeight: previousSteps.clientHeight,
+    scrollTop: previousSteps.scrollTop,
+  }) : true;
+  const previousScrollTop = previousSteps?.scrollTop ?? 0;
+  surface.className = 'agent-trace-surface';
+  surface.replaceChildren();
+  const startedAt = tab.recording
+    ? (tab.recordingStartedAt ?? tab.progress?.started_at)
+    : (tab.trace?.started_at ?? tab.recordingStartedAt);
+  const completedAt = tab.recording
+    ? ''
+    : (tab.recordingCompletedAt ?? tab.trace?.completed_at ?? '');
+  const heading = document.createElement('div');
+  heading.className = 'agent-trace-heading';
+  const title = document.createElement('h2');
+  title.textContent = 'Activities';
+  heading.append(title);
+  surface.append(heading);
+  const divider = document.createElement('hr');
+  divider.className = 'agent-trace-divider';
+  surface.append(divider);
+  const stepsContainer = document.createElement('div');
+  stepsContainer.className = 'agent-trace-steps';
+  if (!tab.trace && !tab.recording && !tab.workflowSelection) {
+    const empty = document.createElement('p');
+    empty.className = 'agent-trace-empty';
+    empty.textContent = 'No activity yet. It will appear here while the assistant works.';
+    stepsContainer.append(empty);
+  }
+  if (tab.workflowSelection) {
+    appendActivity(stepsContainer, workflowSelectionActivity(tab.workflowSelection.name));
+  }
+  if (isAgentTrace(tab.trace)) {
+    for (const step of tab.trace.steps) {
+      const activities = traceStepActivities(step);
+      for (const activity of activities) appendActivity(stepsContainer, activity);
+    }
+  }
+  if (tab.recording) appendLiveProgress(stepsContainer, tab);
+  surface.append(stepsContainer);
+
+  const footer = document.createElement('footer');
+  footer.className = 'agent-trace-footer';
+  const duration = traceDurationElement(
+    'agent-trace-duration',
+    tab.recording ? 'Elapsed' : 'Duration',
+    startedAt,
+    completedAt,
+  );
+  if (duration) footer.append(duration);
+  surface.append(footer);
+  stepsContainer.scrollTop = wasNearBottom
+    ? stepsContainer.scrollHeight
+    : preservedScrollTop(previousScrollTop, stepsContainer.scrollHeight, stepsContainer.clientHeight);
 }
 
 function restoreInfoState(sessionId) {
@@ -174,12 +472,11 @@ function restoreInfoState(sessionId) {
     return { tabs: [], selectedId: null, open: false };
   }
 
-  const hasRestorableDocuments = saved.documents === true;
-  const hadTerminalTabs = saved.terminals === true;
+  const hasRestorableDocuments = saved.documentsAdded === true;
   const state = {
     tabs: [],
     selectedId: null,
-    open: saved.open === true && (hasRestorableDocuments || !hadTerminalTabs),
+    open: saved.open === true,
   };
   if (hasRestorableDocuments) {
     const tab = createDocumentTab(sessionId);
@@ -193,9 +490,93 @@ function persistInfoState(sessionId, state = infoSessions.get(sessionId)) {
   if (!sessionId || !state) return;
   localStorage.setItem(`${INFO_STATE_KEY_PREFIX}${sessionId}`, JSON.stringify({
     open: state.open,
-    documents: state.tabs.some((tab) => tab.kind === 'documents'),
-    terminals: state.tabs.some((tab) => tab.kind === 'terminal'),
+    documentsAdded: state.tabs.some((tab) => tab.kind === 'documents'),
   }));
+}
+
+function setWorkspace(workspace, { openSidebar = false } = {}) {
+  activeWorkspace = workspace === 'workflows' || workspace === 'tools' ? workspace : 'sessions';
+  const isWorkflows = activeWorkspace === 'workflows';
+  const isTools = activeWorkspace === 'tools';
+  appShell.classList.toggle('workflows-active', isWorkflows);
+  appShell.classList.toggle('tools-active', isTools);
+  appShell.classList.remove('sessions-open');
+  $('sessions-panel').hidden = isWorkflows;
+  $('workflow-sidebar').hidden = !isWorkflows;
+  $('tools-main').hidden = !isTools;
+  $('main-panel').hidden = isWorkflows || isTools;
+  $('workflow-main').hidden = !isWorkflows;
+  $('info-toggle').hidden = isWorkflows || isTools;
+  $('info-panel').hidden = isWorkflows || isTools || !(infoState()?.open ?? false);
+
+  $('chat-nav').classList.toggle('active', !isWorkflows && !isTools);
+  if (isWorkflows || isTools) $('chat-nav').removeAttribute('aria-current');
+  else $('chat-nav').setAttribute('aria-current', 'page');
+  $('workflows-nav').classList.toggle('active', isWorkflows);
+  if (isWorkflows) $('workflows-nav').setAttribute('aria-current', 'page');
+  else $('workflows-nav').removeAttribute('aria-current');
+  $('tools-nav').classList.toggle('active', isTools);
+  if (isTools) $('tools-nav').setAttribute('aria-current', 'page');
+  else $('tools-nav').removeAttribute('aria-current');
+  $('chat-nav').setAttribute('aria-expanded', 'false');
+  $('workflows-nav').setAttribute('aria-expanded', String(isWorkflows && openSidebar));
+
+  if (isWorkflows && !workflowsLoaded) void loadWorkflowPreferences();
+  if (!isWorkflows && !isTools && activeSessionId) {
+    const panelOpen = infoState()?.open ?? false;
+    appShell.classList.toggle('info-collapsed', !panelOpen);
+    $('info-toggle').setAttribute('aria-expanded', String(panelOpen));
+    $('info-toggle').title = panelOpen
+        ? 'Hide Activity, tools, and files'
+        : 'Show Activity, tools, and files';
+    renderInfoPanel();
+    const tab = selectedTerminal();
+    if (tab && panelOpen) fitTerminal(tab);
+  }
+  if (isWorkflows && openSidebar) {
+    appShell.classList.add('sessions-open');
+    $('workflows-nav').setAttribute('aria-expanded', 'true');
+  }
+  queueBrowserBoundsSync();
+}
+
+function renderToolCards() {
+  const grid = $('tools-grid');
+  grid.replaceChildren();
+  for (const tool of TOOL_CATALOG) {
+    const card = document.createElement('button');
+    card.type = 'button';
+    card.className = 'tool-card';
+    card.dataset.toolId = tool.id;
+    card.setAttribute('aria-haspopup', 'dialog');
+    card.setAttribute('aria-label', `${tool.name}. ${tool.summary} View details.`);
+
+    const icon = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+    icon.setAttribute('viewBox', '0 0 24 24');
+    icon.setAttribute('aria-hidden', 'true');
+    icon.setAttribute('focusable', 'false');
+    for (const pathData of tool.icon) {
+      const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+      path.setAttribute('d', pathData);
+      icon.append(path);
+    }
+    const iconWrap = document.createElement('span');
+    iconWrap.className = 'tool-card-icon';
+    iconWrap.append(icon);
+
+    const name = document.createElement('h2');
+    name.className = 'tool-card-name';
+    name.textContent = tool.name;
+    const summary = document.createElement('p');
+    summary.className = 'tool-card-summary';
+    summary.textContent = tool.summary;
+    const prompt = document.createElement('span');
+    prompt.className = 'tool-card-prompt';
+    prompt.textContent = 'Learn more';
+
+    card.append(iconWrap, name, summary, prompt);
+    grid.append(card);
+  }
 }
 
 function selectedTerminal(sessionId = activeSessionId) {
@@ -203,9 +584,63 @@ function selectedTerminal(sessionId = activeSessionId) {
   return state?.tabs.find((tab) => tab.kind === 'terminal' && tab.id === state.selectedId) ?? null;
 }
 
-function terminalContext(sessionId = activeSessionId) {
-  const tab = selectedTerminal(sessionId);
-  return tab ? readTerminalContext(tab.terminal, MAX_TERMINAL_CONTEXT_LENGTH) : '';
+function focusActivityTab(sessionId, state = infoState(sessionId)) {
+  const activityTab = state?.tabs.find((tab) => tab.kind === 'trace');
+  if (!state || !activityTab) return;
+  state.selectedId = activityTab.id;
+  if (activeWorkspace === 'sessions' && activeSessionId === sessionId) state.open = true;
+  persistInfoState(sessionId, state);
+  if (activeSessionId === sessionId) openInfoPanel();
+}
+
+function ensureBrowserTab(sessionId, browserTabId, url = '') {
+  if (!sessionId || typeof browserTabId !== 'string') return;
+  const state = infoState(sessionId);
+  let tab = state.tabs.find((candidate) => candidate.kind === 'browser'
+    && candidate.browserTabId === browserTabId);
+  if (!tab) {
+    tab = createBrowserTab(sessionId, browserTabId, url);
+    state.tabs.push(tab);
+  }
+  persistInfoState(sessionId, state);
+  if (activeSessionId === sessionId && state.open && activeWorkspace === 'sessions') {
+    renderInfoPanel();
+  }
+}
+
+function openBrowserTab(sessionId, url = '', { select = false } = {}) {
+  if (!sessionId) return null;
+  const state = infoState(sessionId);
+  const tab = createBrowserTab(sessionId, window.crypto.randomUUID(), url);
+  state.tabs.push(tab);
+  if (select) state.selectedId = tab.id;
+  if (activeWorkspace === 'sessions' && activeSessionId === sessionId) state.open = true;
+  persistInfoState(sessionId, state);
+  if (activeSessionId === sessionId) openInfoPanel();
+  return tab;
+}
+
+function showWebSearchResults(sessionId, resultSet) {
+  if (!sessionId || !resultSet || typeof resultSet.query !== 'string'
+    || !Array.isArray(resultSet.results)) return;
+  const state = infoState(sessionId);
+  let tab = state.tabs.find((candidate) => candidate.kind === 'web-search');
+  let created = false;
+  if (!tab) {
+    tab = createWebSearchTab(sessionId);
+    state.tabs.push(tab);
+    created = true;
+  }
+  tab.query = resultSet.query;
+  tab.searching = false;
+  tab.searchError = '';
+  tab.searches.push(resultSet);
+  if (tab.searches.length > 20) tab.searches.shift();
+  persistInfoState(sessionId, state);
+  if (activeSessionId === sessionId && activeWorkspace === 'sessions' && state.open) {
+    if (created) renderInfoPanel();
+    else if (state.selectedId === tab.id) renderWebSearchSurface(tab);
+  }
 }
 
 function currentTerminalTheme() {
@@ -218,16 +653,250 @@ function currentTerminalTheme() {
   });
 }
 
+function browserStateFor(tab) {
+  return browserStates.get(JSON.stringify([tab.sessionId, tab.browserTabId]))
+    ?? { url: '', title: '', loading: false, error: '' };
+}
+
+function renderBrowserSurface(tab) {
+  const surface = tab.surface;
+  surface.replaceChildren();
+  surface.className = 'browser-tab-surface';
+
+  const toolbar = document.createElement('div');
+  toolbar.className = 'browser-toolbar';
+  const addBrowserButton = (label, title, action) => {
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.className = 'quiet-button browser-control';
+    button.textContent = label;
+    button.title = title;
+    button.setAttribute('aria-label', title);
+    button.addEventListener('click', () => {
+      void action().catch((error) => {
+        showActivity({ kind: 'error', message: `Browser action failed: ${error.message}` });
+      });
+    });
+    return button;
+  };
+  toolbar.append(
+    addBrowserButton('‹', 'Go back', () => api.browserBack(tab.sessionId, tab.browserTabId)),
+    addBrowserButton('›', 'Go forward', () => api.browserForward(tab.sessionId, tab.browserTabId)),
+    addBrowserButton('↻', 'Reload page', () => api.reloadBrowser(tab.sessionId, tab.browserTabId)),
+  );
+
+  const form = document.createElement('form');
+  form.className = 'browser-navigation-form';
+  const address = document.createElement('input');
+  address.type = 'text';
+  address.className = 'browser-address';
+  address.autocomplete = 'off';
+  address.spellcheck = false;
+  address.setAttribute('aria-label', 'Search the web or enter a page URL');
+  address.placeholder = 'Search the web or enter a URL';
+  const current = browserStateFor(tab);
+  address.value = current.url;
+  address.addEventListener('focus', () => address.select());
+  form.addEventListener('submit', (event) => {
+    event.preventDefault();
+    const value = address.value.trim();
+    if (!value) return;
+    let parsedUrl;
+    try {
+      parsedUrl = new URL(value);
+    } catch {
+      parsedUrl = null;
+    }
+    const action = parsedUrl && ['http:', 'https:'].includes(parsedUrl.protocol)
+      ? api.navigateBrowser(tab.sessionId, tab.browserTabId, value)
+      : api.searchBrowser(tab.sessionId, tab.browserTabId, value);
+    void action.catch((error) => {
+      showActivity({ kind: 'error', message: `Could not open web content: ${error.message}` });
+    });
+  });
+  const go = document.createElement('button');
+  go.type = 'submit';
+  go.className = 'quiet-button browser-control';
+  go.textContent = 'Go';
+  form.append(address, go);
+  toolbar.append(form);
+
+  const status = document.createElement('p');
+  status.className = 'browser-status';
+  status.setAttribute('role', 'status');
+  status.textContent = current.error || (current.loading
+    ? 'Loading web page…'
+    : current.title || 'Websites and search requests are external; page content is untrusted.');
+
+  const viewport = document.createElement('div');
+  viewport.className = 'browser-viewport';
+  viewport.setAttribute('aria-label', 'Visible web page');
+  surface.append(toolbar, status, viewport);
+}
+
+function renderWebSearchSurface(tab) {
+  const surface = tab.surface;
+  surface.replaceChildren();
+  surface.className = 'web-search-tab-surface';
+  const heading = document.createElement('div');
+  heading.className = 'web-search-tab-heading';
+  const title = document.createElement('h2');
+  title.textContent = 'Search results';
+  const attribution = document.createElement('p');
+  attribution.className = 'web-search-attribution';
+  attribution.textContent = 'Powered by ';
+  const attributionLink = document.createElement('a');
+  attributionLink.href = 'https://lite.duckduckgo.com/lite/';
+  attributionLink.textContent = 'DuckDuckGo';
+  attributionLink.setAttribute('aria-label', 'Search powered by DuckDuckGo');
+  attributionLink.title = 'Search powered by DuckDuckGo';
+  attributionLink.addEventListener('click', (event) => {
+    event.preventDefault();
+    const browserTab = openBrowserTab(tab.sessionId, attributionLink.href);
+    void api.navigateBrowser(tab.sessionId, browserTab.browserTabId, attributionLink.href).catch((error) => {
+      showActivity({ kind: 'error', message: `Could not open DuckDuckGo Lite: ${error.message}` });
+    });
+  });
+  attribution.append(attributionLink);
+  heading.append(title, attribution);
+  surface.append(heading);
+
+  const form = document.createElement('form');
+  form.className = 'web-search-form';
+  form.setAttribute('role', 'search');
+  form.setAttribute('aria-label', 'Search the web');
+  const query = document.createElement('input');
+  query.type = 'search';
+  query.className = 'web-search-query';
+  query.maxLength = 500;
+  query.autocomplete = 'off';
+  query.placeholder = 'Search the web';
+  query.setAttribute('aria-label', 'Web search query');
+  query.value = tab.query ?? tab.searches.at(-1)?.query ?? '';
+  const submit = document.createElement('button');
+  submit.type = 'submit';
+  submit.className = 'quiet-button web-search-submit';
+  submit.textContent = tab.searching ? 'Searching…' : 'Search';
+  submit.disabled = tab.searching === true;
+  const status = document.createElement('p');
+  status.className = 'web-search-status';
+  status.setAttribute('role', 'status');
+  status.textContent = tab.searching ? 'Searching…' : tab.searchError ?? '';
+  form.append(query, submit);
+  form.addEventListener('submit', (event) => {
+    event.preventDefault();
+    const searchQuery = query.value.trim();
+    if (!searchQuery || tab.searching) return;
+    tab.query = searchQuery;
+    tab.searching = true;
+    tab.searchError = '';
+    submit.disabled = true;
+    submit.textContent = 'Searching…';
+    status.textContent = 'Searching…';
+    void api.searchWeb(tab.sessionId, searchQuery).catch((error) => {
+      tab.searching = false;
+      tab.searchError = error.message;
+      renderWebSearchSurface(tab);
+    });
+  });
+  surface.append(form, status);
+
+  const searches = document.createElement('div');
+  searches.className = 'web-search-runs';
+  for (const resultSet of tab.searches) {
+    const section = document.createElement('section');
+    section.className = 'web-search-run';
+    const query = document.createElement('h3');
+    query.textContent = resultSet.query;
+    section.append(query);
+    if (resultSet.results.length === 0) {
+      section.classList.add('web-search-run-empty');
+    }
+    for (const result of resultSet.results) {
+      if (!result || typeof result.title !== 'string' || typeof result.url !== 'string') continue;
+      let url;
+      try {
+        url = new URL(result.url);
+      } catch {
+        continue;
+      }
+      if (!['http:', 'https:'].includes(url.protocol)) continue;
+      const card = document.createElement('article');
+      card.className = 'web-search-result';
+      const link = document.createElement('a');
+      link.href = url.href;
+      link.textContent = result.title;
+      link.addEventListener('click', (event) => {
+        event.preventDefault();
+        const browserTab = openBrowserTab(tab.sessionId, url.href, { select: true });
+        void api.navigateBrowser(tab.sessionId, browserTab.browserTabId, url.href).catch((error) => {
+          showActivity({ kind: 'error', message: `Could not open the search result: ${error.message}` });
+        });
+      });
+      const address = document.createElement('p');
+      address.className = 'web-search-result-url';
+      address.textContent = url.hostname;
+      card.append(link, address);
+      if (typeof result.snippet === 'string' && result.snippet) {
+        const snippet = document.createElement('p');
+        snippet.textContent = result.snippet;
+        card.append(snippet);
+      }
+      if (typeof result.publishedAt === 'string' && result.publishedAt) {
+        const published = document.createElement('p');
+        published.className = 'web-search-result-meta';
+        published.textContent = result.publishedAt;
+        card.append(published);
+      }
+      section.append(card);
+    }
+    searches.append(section);
+  }
+  surface.append(searches);
+}
+
+function syncBrowserViewBounds() {
+  const state = infoSessions.get(activeSessionId);
+  const tab = state?.tabs.find((candidate) =>
+    candidate.kind === 'browser' && candidate.id === state.selectedId);
+  const viewport = tab?.surface.querySelector('.browser-viewport');
+  const dialogOpen = [...document.querySelectorAll('dialog')].some((dialog) => dialog.open);
+  const visible = Boolean(tab && viewport?.isConnected && !viewport.hidden
+    && !viewport.closest('[hidden]') && !$('info-panel').hidden && !dialogOpen
+    && !appShell.classList.contains('info-collapsed'));
+  const rect = viewport?.getBoundingClientRect();
+  const bounds = rect
+    ? { x: rect.left, y: rect.top, width: rect.width, height: rect.height }
+    : { x: 0, y: 0, width: 0, height: 0 };
+  if (!activeSessionId) return;
+  void api.setBrowserBounds(activeSessionId, visible ? tab.browserTabId : null, bounds, visible, {
+    width: window.innerWidth,
+    height: window.innerHeight,
+  }).catch((error) => {
+    showActivity({ kind: 'error', message: `Could not position the Browser tab: ${error.message}` });
+  });
+}
+
+function queueBrowserBoundsSync() {
+  if (browserBoundsFrame !== null) return;
+  browserBoundsFrame = requestAnimationFrame(() => {
+    browserBoundsFrame = null;
+    syncBrowserViewBounds();
+  });
+}
+
 function renderInfoPanel() {
   const state = infoSessions.get(activeSessionId);
   const tabList = $('info-tab-list');
   const panels = $('info-tab-panels');
-  const documentsMenuItem = $('info-add-menu').querySelector('[data-add-info-tab="documents"]');
-  documentsMenuItem.hidden = Boolean(state?.tabs.some((tab) => tab.kind === 'documents'));
-  if (![...$('info-add-menu').querySelectorAll('[role="menuitem"]')].some((item) => !item.hidden)) {
-    $('info-add-menu').hidden = true;
-    $('info-add-tab').setAttribute('aria-expanded', 'false');
-  }
+  const filesMenuItem = $('info-add-menu').querySelector('[data-add-info-tab="documents"]');
+  const webSearchMenuItem = $('info-add-menu').querySelector('[data-add-info-tab="web-search"]');
+  filesMenuItem.hidden = state?.tabs.some((tab) => tab.kind === 'documents') ?? false;
+  webSearchMenuItem.hidden = state?.tabs.some((tab) => tab.kind === 'web-search') ?? false;
+  const previousFocusedElement = document.activeElement;
+  const focusedTabControl = tabList.contains(document.activeElement)
+    ? document.activeElement.id
+    : '';
   tabList.replaceChildren();
   panels.replaceChildren();
   if (!state) return;
@@ -244,8 +913,10 @@ function renderInfoPanel() {
     select.setAttribute('role', 'tab');
     select.setAttribute('aria-controls', `info-panel-${tab.id}`);
     select.setAttribute('aria-selected', String(selected));
+    select.setAttribute('aria-label', tab.title);
+    select.title = tab.title;
     select.tabIndex = selected ? 0 : -1;
-    select.textContent = tab.title;
+    select.append(createInfoTabIcon(tab.kind));
     select.addEventListener('click', () => {
       state.selectedId = tab.id;
       persistInfoState(activeSessionId, state);
@@ -256,14 +927,16 @@ function renderInfoPanel() {
     });
     const close = document.createElement('button');
     close.type = 'button';
+    close.id = `info-tab-close-${tab.id}`;
     close.className = 'info-tab-close';
     close.setAttribute('aria-label', `Close ${tab.title}`);
     close.title = `Close ${tab.title}`;
     close.textContent = '×';
     const session = sessions.find((item) => item.id === activeSessionId);
-    const documentTabLocked = tab.kind === 'documents' && (session?.selectedDocumentIds ?? []).length > 0;
-    close.hidden = documentTabLocked;
-    close.setAttribute('aria-hidden', String(documentTabLocked));
+    const hasAttachedFiles = (session?.selectedDocumentIds ?? []).length > 0;
+    const tabCanClose = canCloseInfoTab(tab, hasAttachedFiles);
+    close.hidden = !tabCanClose;
+    close.setAttribute('aria-hidden', String(!tabCanClose));
     close.addEventListener('click', () => closeInfoTab(activeSessionId, tab.id));
     wrapper.append(select, close);
     tabList.append(wrapper);
@@ -274,7 +947,15 @@ function renderInfoPanel() {
     tab.surface.setAttribute('aria-labelledby', `info-tab-${tab.id}`);
     panels.append(tab.surface);
     if (tab.kind === 'documents') renderDocumentLibrarySurface(tab);
+    else if (tab.kind === 'trace') renderTraceSurface(tab);
+    else if (tab.kind === 'browser') renderBrowserSurface(tab);
+    else if (tab.kind === 'web-search') renderWebSearchSurface(tab);
   }
+  if (focusedTabControl) document.getElementById(focusedTabControl)?.focus({ preventScroll: true });
+  else if (previousFocusedElement instanceof HTMLElement && previousFocusedElement.isConnected) {
+    previousFocusedElement.focus({ preventScroll: true });
+  }
+  queueBrowserBoundsSync();
 }
 
 function renderDocumentLibraryTabs(sessionId) {
@@ -321,10 +1002,10 @@ async function waitForTerminalPanelReady(tab) {
     }
     await new Promise((resolve) => requestAnimationFrame(resolve));
   }
-  throw new Error('The terminal panel did not finish initializing. Open the Tools panel and try again.');
+  throw new Error('The terminal panel did not finish initializing. Open the Activity panel and try again.');
 }
 
-async function addTerminalTab(sessionId) {
+async function addTerminalTab(sessionId, { select = true } = {}) {
   if (!sessionId || !sessions.some((session) => session.id === sessionId)) return;
   const state = infoState(sessionId);
   const id = window.crypto.randomUUID();
@@ -362,9 +1043,9 @@ async function addTerminalTab(sessionId) {
     resizeObserver: null,
   };
   state.tabs.push(tab);
-  state.selectedId = id;
+  if (select) state.selectedId = id;
   persistInfoState(sessionId, state);
-  renderInfoPanel();
+  if (activeSessionId === sessionId) renderInfoPanel();
   terminal.open(surface);
   function updateCursorMarker() {
     const screen = surface.querySelector('.xterm-screen');
@@ -425,12 +1106,12 @@ async function addTerminalTab(sessionId) {
 
   let createdTerminalId;
   try {
-    await waitForTerminalPanelReady(tab);
+    if (select) await waitForTerminalPanelReady(tab);
     const result = await api.createTerminal({
       terminalId: id,
       sessionId,
-      cols: terminal.cols,
-      rows: terminal.rows,
+      cols: terminal.cols || 80,
+      rows: terminal.rows || 24,
     });
     createdTerminalId = result.terminalId;
     if (!state.tabs.includes(tab)) {
@@ -438,11 +1119,13 @@ async function addTerminalTab(sessionId) {
       return;
     }
     tab.started = true;
-    fitAddon.fit();
-    await api.resizeTerminal(tab.id, terminal.cols, terminal.rows);
+    if (select) {
+      fitAddon.fit();
+      await api.resizeTerminal(tab.id, terminal.cols, terminal.rows);
+    }
     await readiness.waitUntilReady();
     tab.shellReady = true;
-    terminal.focus();
+    if (select) terminal.focus();
     return tab;
   } catch (error) {
     readiness.fail(error);
@@ -465,20 +1148,18 @@ async function ensureTerminalReady(sessionId) {
   if (!sessions.some((session) => session.id === sessionId)) {
     throw new Error('The conversation for this terminal command no longer exists.');
   }
-  if (activeSessionId !== sessionId) selectSession(sessionId);
-  openInfoPanel();
   const state = infoState(sessionId);
   let tab = state.tabs.find((candidate) => candidate.id === state.selectedId && candidate.started)
     ?? state.tabs.find((candidate) => candidate.started);
-  if (!tab) tab = await addTerminalTab(sessionId);
+  if (!tab) tab = await addTerminalTab(sessionId, { select: false });
   if (!tab?.started) throw new Error('A terminal could not be started for this conversation.');
-  state.selectedId = tab.id;
-  persistInfoState(sessionId, state);
-  renderInfoPanel();
-  await waitForTerminalPanelReady(tab);
+  const terminalSelected = activeSessionId === sessionId
+    && activeWorkspace === 'sessions'
+    && state.open
+    && state.selectedId === tab.id;
+  if (terminalSelected) await waitForTerminalPanelReady(tab);
   await tab.readiness.waitUntilReady();
   tab.shellReady = true;
-  tab.terminal.focus();
   return tab;
 }
 
@@ -615,7 +1296,7 @@ function closeInfoTab(sessionId, tabId) {
   if (!state || index < 0) return;
   const currentTab = state.tabs[index];
   const session = sessions.find((item) => item.id === sessionId);
-  if (currentTab.kind === 'documents' && (session?.selectedDocumentIds ?? []).length > 0) return;
+  if (!canCloseInfoTab(currentTab, (session?.selectedDocumentIds ?? []).length > 0)) return;
   const [tab] = state.tabs.splice(index, 1);
   if (tab.kind === 'terminal') {
     tab.readiness.fail(new Error('Terminal closed before the shell prompt was ready.'));
@@ -623,6 +1304,12 @@ function closeInfoTab(sessionId, tabId) {
     tab.terminal.dispose();
     void api.closeTerminal(tab.id, sessionId).catch((error) => {
       showActivity({ kind: 'error', message: `Could not close terminal: ${error.message}` });
+    });
+  }
+  if (tab.kind === 'browser') {
+    browserStates.delete(JSON.stringify([sessionId, tab.browserTabId]));
+    void api.closeBrowser(sessionId, tab.browserTabId).catch((error) => {
+      showActivity({ kind: 'error', message: `Could not close Browser tab: ${error.message}` });
     });
   }
   if (state.selectedId === tab.id) {
@@ -660,6 +1347,9 @@ function closeSessionInfo(sessionId) {
       tab.resizeObserver?.disconnect();
       tab.terminal.dispose();
     }
+    if (tab.kind === 'browser') {
+      browserStates.delete(JSON.stringify([sessionId, tab.browserTabId]));
+    }
   }
   infoSessions.delete(sessionId);
   localStorage.removeItem(`${INFO_STATE_KEY_PREFIX}${sessionId}`);
@@ -684,9 +1374,11 @@ function renderSelectedDocumentSources() {
     session.selectedDocumentIds,
     new Set(session.retrievedDocumentIds ?? []),
   );
-  chips.textContent = `${counts.used.toLocaleString()}/${counts.total.toLocaleString()} Documents`;
-  container.setAttribute('aria-label', `Documents used in context: ${counts.used} of ${counts.total}`);
-  container.title = `${counts.used} of ${counts.total} attached documents used in this conversation's context`;
+  const documentCount = counts.total.toLocaleString();
+  const documentLabel = counts.total === 1 ? 'Document' : 'Documents';
+  chips.textContent = `${documentCount} ${documentLabel}`;
+  container.setAttribute('aria-label', `${documentCount} attached ${documentLabel.toLowerCase()}`);
+  container.title = `${documentCount} attached ${documentLabel.toLowerCase()}`;
   container.hidden = false;
 }
 
@@ -714,10 +1406,9 @@ async function importDocuments(sessionId = activeSessionId) {
     const attachedCount = newReferenceIds.filter((id) => !previousReferences.includes(id)).length;
     const summary = [
       attachedCount > 0 ? `Added ${attachedCount} file or folder ${attachedCount === 1 ? 'reference' : 'references'}.` : '',
-      documents.unindexedCount > 0 ? `${documents.unindexedCount} supported files could not be indexed under the 250 MB local cache limit. The assistant can search them on demand.` : '',
       ...addition.errors.map((item) => `${item.name}: ${item.error}`),
     ].filter(Boolean);
-    if (addition.errors.length > 0 || documents.unindexedCount > 0) {
+    if (addition.errors.length > 0) {
       showActivity({
         kind: 'error',
         message: summary.join(' · ') || 'Some selected files could not be indexed.',
@@ -755,10 +1446,9 @@ async function addDocumentFolder(sessionId = activeSessionId) {
     const attachedCount = newReferenceIds.filter((id) => !previousReferences.includes(id)).length;
     const messages = [
       attachedCount > 0 ? `Added ${attachedCount} folder reference.` : '',
-      documents.unindexedCount > 0 ? `${documents.unindexedCount} supported files could not be indexed under the 250 MB local cache limit. The assistant can search them on demand.` : '',
       ...result.errors.map((item) => `${item.name}: ${item.error}`),
     ].filter(Boolean);
-    if (result.errors.length > 0 || documents.unindexedCount > 0) {
+    if (result.errors.length > 0) {
       showActivity({ kind: 'error', message: messages.join(' · ') || 'Some files in the folder could not be indexed.' });
     } else if (attachedCount > 0) {
       showActivity({ kind: 'complete', message: messages.join(' ') });
@@ -780,7 +1470,8 @@ function requestDocumentRemoval(sessionId, referenceId, name, kind) {
 
 async function removeLibraryDocument(sessionId, referenceId, name) {
   try {
-    const updatedSession = await api.removeDocument(referenceId, sessionId);
+    const removal = await api.removeDocument(referenceId, sessionId);
+    const updatedSession = removal?.session;
     if (!updatedSession || updatedSession.id !== sessionId) {
       throw new Error('The updated conversation could not be loaded after document removal.');
     }
@@ -803,7 +1494,9 @@ async function removeLibraryDocument(sessionId, referenceId, name) {
       ensureDocumentTab(sessionId);
       renderInfoPanel();
     }
-    showActivity({ kind: 'complete', message: `Removed the reference to "${name}". The original was not changed.` });
+    showActivity(removal.cleanupWarning
+      ? { kind: 'error', message: `Removed the reference to "${name}", but ${removal.cleanupWarning}` }
+      : { kind: 'complete', message: `Removed the reference to "${name}". The original was not changed.` });
   } catch (error) {
     showActivity({ kind: 'error', message: `Could not remove "${name}": ${error.message}` });
   }
@@ -811,11 +1504,7 @@ async function removeLibraryDocument(sessionId, referenceId, name) {
 
 function reportDocumentList(listing, sessionId) {
   if (activeSessionId !== sessionId) return;
-  const messages = [];
-  if (listing.unindexedCount > 0) {
-    messages.push(`${listing.unindexedCount} supported files aren't in the local cache under the 250 MB limit; the assistant can search them on demand.`);
-  }
-  messages.push(...listing.errors.map((item) => `${item.name}: ${item.error}`));
+  const messages = listing.errors.map((item) => `${item.name}: ${item.error}`);
   if (messages.length > 0) showActivity({ kind: 'error', message: messages.join(' · ') });
 }
 
@@ -910,7 +1599,7 @@ function renderDocumentLibrarySurface(tab) {
   const heading = document.createElement('div');
   heading.className = 'document-library-heading';
   const title = document.createElement('h2');
-  title.textContent = 'Documents';
+  title.textContent = 'Files';
   const headerActions = document.createElement('div');
   headerActions.className = 'document-header-actions';
   const searchToggle = document.createElement('button');
@@ -975,8 +1664,8 @@ function renderDocumentLibrarySurface(tab) {
   surface.append(count);
   if (libraryUnindexedCount > 0) {
     const overflow = document.createElement('p');
-    overflow.className = 'document-library-warning';
-    overflow.textContent = `${libraryUnindexedCount} supported files aren't in the local index cache. The assistant can search them on demand.`;
+    overflow.className = 'document-library-info';
+    overflow.textContent = `${libraryUnindexedCount} ${libraryUnindexedCount === 1 ? 'file is' : 'files are'} not cached locally and will be searched on demand; searches may take longer.`;
     surface.append(overflow);
   }
 
@@ -1199,23 +1888,6 @@ function renderDocumentLibrarySurface(tab) {
   tab.surface.replaceChildren(surface);
 }
 
-function openDocumentLibraryTab(sessionId = activeSessionId, { refresh = true } = {}) {
-  if (!sessionId) return;
-  const state = infoState(sessionId);
-  let tab = state.tabs.find((item) => item.kind === 'documents');
-  if (!tab) {
-    tab = createDocumentTab(sessionId);
-    state.tabs.push(tab);
-  }
-  state.selectedId = tab.id;
-  persistInfoState(sessionId, state);
-  openInfoPanel();
-  renderInfoPanel();
-  if (refresh && (sessions.find((session) => session.id === sessionId)?.selectedDocumentIds ?? []).length > 0) {
-    void refreshDocumentLibrary(sessionId);
-  }
-}
-
 function ensureDocumentTab(sessionId) {
   if (!sessionId) return null;
   const state = infoState(sessionId);
@@ -1229,12 +1901,49 @@ function ensureDocumentTab(sessionId) {
   return tab;
 }
 
+function openWebSearchTab(sessionId = activeSessionId) {
+  if (!sessionId) return;
+  const state = infoState(sessionId);
+  let tab = state.tabs.find((item) => item.kind === 'web-search');
+  if (!tab) {
+    tab = createWebSearchTab(sessionId);
+    state.tabs.push(tab);
+  }
+  state.selectedId = tab.id;
+  persistInfoState(sessionId, state);
+  openInfoPanel();
+}
+
+function openDocumentLibraryTab(sessionId = activeSessionId, { refresh = true } = {}) {
+  if (!sessionId) return;
+  const tab = ensureDocumentTab(sessionId);
+  if (!tab) return;
+  const state = infoState(sessionId);
+  state.selectedId = tab.id;
+  persistInfoState(sessionId, state);
+  openInfoPanel();
+  if (refresh) void refreshDocumentLibrary(sessionId);
+}
+
 function activeSession() {
   return sessions.find((session) => session.id === activeSessionId) ?? null;
 }
 
 function requestState(sessionId) {
   return requestStates.get(sessionId) ?? null;
+}
+
+function startTraceRecording(sessionId) {
+  const state = infoState(sessionId);
+  const tab = state?.tabs.find((item) => item.kind === 'trace');
+  if (!state || !tab) return;
+  tab.recordingStartedAt = null;
+  tab.recordingCompletedAt = null;
+  tab.progress = null;
+  tab.workflowSelection = null;
+  updateTraceTab(tab, { recording: true });
+  refreshTraceDurationTicker();
+  focusActivityTab(sessionId, state);
 }
 
 function requestHistory(session) {
@@ -1253,15 +1962,48 @@ function estimateTokens(text) {
   return Math.ceil(text.length / 4);
 }
 
-function estimatedPromptTokens(question, history, selectedTerminalOutput = '') {
-  const prompt = history.length === 0
-    ? question
-    : `Prior conversation:\n${history.map(({ role, content }) =>
-      `${role === 'user' ? 'User' : 'Assistant'}: ${content}`
-    ).join('\n')}\n\nCurrent question:\n${question}`;
-  const selectedCount = selectedDocumentIds().length;
-  const documentBudget = selectedCount > 0 ? MAX_DOCUMENT_CONTEXT_CHARS : 0;
-  return estimateTokens(`${SYSTEM_PROMPT}\n${selectedTerminalOutput}\n${prompt}`) + estimateTokens(' '.repeat(documentBudget));
+function estimatedPromptTokens(question, history) {
+  return estimateTokens(JSON.stringify({
+    task: question,
+    conversation_history: history,
+    summary: '',
+    recent_steps: [],
+    step_number: 1,
+  }));
+}
+
+function rightPanelSurfaceText(surface) {
+  const blocks = surface.querySelectorAll('h1, h2, h3, p, li, button, a, [role="button"]');
+  const text = [...blocks]
+    .map((element) => element.textContent?.trim() ?? '')
+    .filter(Boolean)
+    .join('\n');
+  return text || surface.textContent?.trim() || '';
+}
+
+function rightPanelContext(sessionId) {
+  const state = infoState(sessionId);
+  let remaining = MAX_RIGHT_PANEL_CONTEXT_LENGTH;
+  return state.tabs.map((tab) => {
+    const entry = {
+      id: tab.id,
+      kind: tab.kind,
+      title: tab.title,
+      selected: tab.id === state.selectedId,
+    };
+    if (tab.kind === 'browser') {
+      entry.browserTabId = tab.browserTabId;
+      return entry;
+    }
+    const content = tab.kind === 'terminal'
+      ? readTerminalContext(tab.terminal)
+      : rightPanelSurfaceText(tab.surface);
+    const length = Math.min(content.length, MAX_RIGHT_PANEL_TAB_CONTENT_LENGTH, remaining);
+    entry.content = content.slice(0, length);
+    entry.truncated = length < content.length;
+    remaining -= length;
+    return entry;
+  });
 }
 
 function updateContextMeter(value) {
@@ -1285,16 +2027,28 @@ function updateLimitMeters() {
   const state = session ? requestState(session.id) : null;
   const history = session ? requestHistory(session) : [];
   const promptTokens = state?.promptTokens
-    ?? estimatedPromptTokens(prompt.value, history, terminalContext());
+    ?? estimatedPromptTokens(prompt.value, history);
   updateContextMeter(promptTokens);
+}
+
+function resizePrompt() {
+  prompt.style.height = 'auto';
+  const containerHeight = $('sessions-panel').clientHeight || appShell.clientHeight;
+  const maxHeight = Math.max(38, Math.floor(containerHeight * 0.25));
+  const height = Math.min(prompt.scrollHeight, maxHeight);
+  prompt.style.height = `${height}px`;
+  prompt.style.overflowY = prompt.scrollHeight > maxHeight ? 'auto' : 'hidden';
 }
 
 function updateComposerControls() {
   const state = requestState(activeSessionId);
   sendButton.disabled = !assistantAvailable || Boolean(state);
-  cancelButton.hidden = !state || !['queued', 'running'].includes(state.status);
-  cancelButton.disabled = !state || !['queued', 'running'].includes(state.status);
-  cancelButton.textContent = state?.status === 'queued' ? 'Remove from queue' : 'Cancel';
+  cancelButton.hidden = !state || !['queued', 'running', 'cancelling'].includes(state.status);
+  cancelButton.disabled = !state || state.status === 'cancelling'
+    || !['queued', 'running'].includes(state.status);
+  cancelButton.textContent = state?.status === 'queued'
+    ? 'Remove from queue'
+    : state?.status === 'cancelling' ? 'Cancelling…' : 'Cancel';
   updateLimitMeters();
 }
 
@@ -1362,17 +2116,7 @@ function renderSessions() {
     if (state) {
       preview.classList.add('session-thinking');
       preview.setAttribute('role', 'status');
-      preview.textContent = state.answer
-        ? 'Typing…'
-        : state.status === 'queued'
-          ? `Queued${state.queuePosition ? ` · ${state.queuePosition}` : ''}`
-          : state.status === 'cancelling'
-            ? 'Cancelling…'
-            : state.status === 'saving' || state.status === 'submitting'
-              ? 'Submitting…'
-              : state.status === 'awaiting-command-approval'
-                ? 'Awaiting approval…'
-                : 'Thinking…';
+      preview.textContent = sessionRequestPreviewText(state);
     } else {
       preview.textContent = lastMessage?.content ?? 'New conversation';
     }
@@ -1459,7 +2203,7 @@ function linkDocumentCitations(container, sources) {
   }
 }
 
-function responseFooter(content) {
+function responseFooter(content, generationDurationMs) {
   const footer = document.createElement('div');
   footer.className = 'response-footer';
 
@@ -1483,6 +2227,12 @@ function responseFooter(content) {
   copyButton.append(copyIcon);
   copyButton.addEventListener('click', () => void copyResponse(copyButton, content));
   footer.append(copyButton);
+  let duration;
+  if (Number.isSafeInteger(generationDurationMs) && generationDurationMs >= 0) {
+    duration = document.createElement('span');
+    duration.className = 'response-generation-duration';
+    duration.textContent = `Generated in ${formatDuration(generationDurationMs)}`;
+  }
 
   const tokens = estimateTokens(content);
   const percentage = Math.min(100, tokens / responseTokenLimit * 100);
@@ -1529,6 +2279,7 @@ function responseFooter(content) {
   tooltip.append(heading, track, detail);
   meter.append(ring, tooltip);
   footer.append(meter);
+  if (duration) footer.append(duration);
   return footer;
 }
 
@@ -1581,7 +2332,7 @@ function renderMessage(message) {
     wrapper.append(notice);
   }
   if (message.role === 'assistant' && message.status !== 'cancelled') {
-    wrapper.append(responseFooter(message.content));
+    wrapper.append(responseFooter(message.content, message.generationDurationMs));
   }
   messages.append(wrapper);
 }
@@ -1595,30 +2346,24 @@ function renderPendingMessage(state) {
   const label = document.createElement('div');
   label.className = 'message-label';
   label.textContent = 'LIVINGWORDS';
-  if (state.answer) {
+  if (!shouldShowTypingAnimation(state)) {
     const content = document.createElement('div');
     content.className = 'message-content';
     content.innerHTML = renderMarkdown(state.answer, { renderMath: false });
     wrapper.append(label, content);
-    messages.append(wrapper);
-    return;
-  }
-  wrapper.setAttribute('role', 'status');
-  const indicator = document.createElement('div');
-  indicator.className = 'typing-indicator';
-  if (state.status === 'queued') {
-    indicator.textContent = state.queuePosition
-      ? `Waiting in queue · position ${state.queuePosition}`
-      : 'Waiting in queue';
-  } else if (state.status === 'cancelling') {
-    indicator.textContent = 'Cancelling response…';
-  } else if (state.status === 'awaiting-command-approval') {
-    indicator.textContent = 'Waiting for terminal command approval…';
   } else {
-    indicator.setAttribute('aria-hidden', 'true');
-    for (let index = 0; index < 3; index += 1) indicator.append(document.createElement('span'));
+    const indicator = document.createElement('div');
+    indicator.className = 'typing-indicator';
+    const indicatorText = pendingIndicatorText(state.status, state.queuePosition);
+    if (indicatorText !== null) {
+      indicator.textContent = indicatorText;
+    } else {
+      indicator.setAttribute('aria-hidden', 'true');
+      for (let index = 0; index < 3; index += 1) indicator.append(document.createElement('span'));
+    }
+    wrapper.setAttribute('role', 'status');
+    wrapper.append(label, indicator);
   }
-  wrapper.append(label, indicator);
   messages.append(wrapper);
 }
 
@@ -1635,9 +2380,11 @@ function renderSession(session) {
     libraryLoadedSessionId = null;
     const panelOpen = infoState(session.id)?.open ?? false;
     appShell.classList.toggle('info-collapsed', !panelOpen);
-    $('info-panel').hidden = !panelOpen;
+    $('info-panel').hidden = activeWorkspace !== 'sessions' || !panelOpen;
     $('info-toggle').setAttribute('aria-expanded', String(panelOpen));
-    $('info-toggle').title = panelOpen ? 'Hide tools and documents' : 'Show tools and documents';
+    $('info-toggle').title = panelOpen
+        ? 'Hide Activity, tools, and files'
+        : 'Show Activity, tools, and files';
   }
   if ((session.selectedDocumentIds ?? []).length > 0) ensureDocumentTab(session.id);
   $('conversation-title').textContent = session.title || 'A thoughtful place to begin';
@@ -1846,6 +2593,7 @@ async function loadContextWindowPreference() {
 }
 
 function openInfoPanel() {
+  if (activeWorkspace !== 'sessions') return;
   const state = infoState();
   if (state) {
     state.open = true;
@@ -1856,16 +2604,18 @@ function openInfoPanel() {
   appShell.classList.remove('info-collapsed');
   $('info-panel').hidden = false;
   $('info-toggle').setAttribute('aria-expanded', 'true');
-  $('info-toggle').title = 'Hide tools and documents';
+  $('info-toggle').title = 'Hide Activity, tools, and files';
   setPanelWidth('info', Number.parseFloat(getComputedStyle(appShell).getPropertyValue('--info-width')) || PANEL_WIDTHS.info.fallback);
   setPanelWidth('sessions', Number.parseFloat(getComputedStyle(appShell).getPropertyValue('--sessions-width')) || PANEL_WIDTHS.sessions.fallback);
   setPanelWidth('info', Number.parseFloat(getComputedStyle(appShell).getPropertyValue('--info-width')) || PANEL_WIDTHS.info.fallback);
   renderInfoPanel();
+  queueBrowserBoundsSync();
   const tab = selectedTerminal();
   if (tab) fitTerminal(tab);
 }
 
 function closeInfoPanel() {
+  if (activeWorkspace !== 'sessions') return;
   const state = infoState();
   if (state) {
     state.open = false;
@@ -1874,8 +2624,9 @@ function closeInfoPanel() {
   appShell.classList.add('info-collapsed');
   $('info-panel').hidden = true;
   $('info-toggle').setAttribute('aria-expanded', 'false');
-  $('info-toggle').title = 'Show tools and documents';
+  $('info-toggle').title = 'Show Activity, tools, and files';
   $('info-toggle').focus();
+  queueBrowserBoundsSync();
 }
 
 async function refreshStatus() {
@@ -1965,13 +2716,12 @@ async function ask(question) {
 
   const requestId = window.crypto.randomUUID();
   const history = requestHistory(session);
-  const selectedTerminalOutput = terminalContext(session.id);
   const state = {
     requestId,
     status: 'saving',
     queuePosition: null,
     answer: '',
-    promptTokens: estimatedPromptTokens(question, history, selectedTerminalOutput),
+    promptTokens: estimatedPromptTokens(question, history),
     renderScheduled: false,
     autoScroll: true,
   };
@@ -1980,6 +2730,7 @@ async function ask(question) {
   session.messages.push(userMessage);
   updateSessionTitle(session, question);
   requestStates.set(session.id, state);
+  startTraceRecording(session.id);
   if (activeSessionId === session.id) {
     renderSession(session);
     messages.style.display = 'flex';
@@ -1987,6 +2738,7 @@ async function ask(question) {
     messages.scrollTop = messages.scrollHeight;
   }
   prompt.value = '';
+  resizePrompt();
   prompt.focus();
   try {
     try {
@@ -1997,6 +2749,7 @@ async function ask(question) {
       requestStates.delete(session.id);
       showActivity({ kind: 'error', message: `Could not save this conversation: ${error.message}` });
       prompt.value = question;
+      resizePrompt();
       if (activeSessionId === session.id) renderSession(session);
       return;
     }
@@ -2004,7 +2757,7 @@ async function ask(question) {
     try {
       state.status = 'submitting';
       if (activeSessionId === session.id) renderSession(session);
-      await api.ask(requestId, session.id, question, history, selectedTerminalOutput);
+      await api.ask(requestId, session.id, question, history, rightPanelContext(session.id));
       if (requestStates.get(session.id) === state && state.status === 'submitting') {
         state.status = 'queued';
         renderSessions();
@@ -2021,6 +2774,7 @@ async function ask(question) {
         showActivity({ kind: 'error', message: `The request could not be queued, and its conversation update could not be reverted: ${rollbackError.message}` });
       }
       prompt.value = question;
+      resizePrompt();
       if (activeSessionId === session.id) {
         renderSession(session);
       }
@@ -2035,20 +2789,89 @@ async function ask(question) {
 function handleRequestStatus(status) {
   const state = requestState(status.sessionId);
   if (!state || state.requestId !== status.requestId) return;
+  if (state.status === 'cancelling' && ['queued', 'running'].includes(status.status)) return;
   state.status = status.status;
   state.queuePosition = status.queuePosition ?? null;
+  if (status.status === 'running') {
+    const traceTab = infoState(status.sessionId)?.tabs.find((tab) => tab.kind === 'trace');
+    const startedAt = new Date().toISOString();
+    state.startedAt = startedAt;
+    if (traceTab) {
+      traceTab.trace = null;
+      traceTab.liveToolStep = null;
+      traceTab.progress = null;
+      traceTab.workflowSelection = null;
+    }
+    updateTraceTab(traceTab, {
+      recording: true,
+      startedAt,
+      progress: { step_number: 1, started_at: startedAt, phase: 'preparing' },
+    });
+    refreshTraceDurationTicker();
+    if (activeSessionId === status.sessionId) renderInfoPanel();
+  }
   renderSessions();
   if (activeSessionId === status.sessionId) renderSession(activeSession());
 }
 
+function handleRequestTrace(update) {
+  if (!update || typeof update !== 'object'
+    || typeof update.requestId !== 'string' || typeof update.sessionId !== 'string') return;
+  const state = requestState(update.sessionId);
+  if (!state || state.requestId !== update.requestId) return;
+  const traceTab = infoState(update.sessionId)?.tabs.find((tab) => tab.kind === 'trace');
+  if (!traceTab) return;
+  updateTraceTab(traceTab, {
+    trace: update.trace,
+    recording: true,
+    toolEvent: update.toolEvent,
+    progress: update.progress,
+  });
+  refreshTraceDurationTicker();
+  if (isAgentTrace(update.trace)) {
+    state.trace = update.trace;
+    const lastStepStatus = update.trace.steps.at(-1)?.status;
+    if (['complete', 'failed', 'rejected', 'needs_human'].includes(lastStepStatus)) {
+      state.status = 'finishing';
+      renderSessions();
+    }
+  }
+  if (activeSessionId === update.sessionId) {
+    const panelState = infoState(update.sessionId);
+    if (panelState.open && activeWorkspace === 'sessions') renderInfoPanel();
+  }
+}
+
 async function handleRequestResult(result) {
-  const session = sessions.find((item) => item.id === result.sessionId);
-  if (!session) return;
   const state = requestState(result.sessionId);
   if (state && state.requestId !== result.requestId) return;
+  requestStates.delete(result.sessionId);
+  renderSessions();
+  const session = sessions.find((item) => item.id === result.sessionId);
+  if (!session) return;
   const previousScrollTop = messages.scrollTop;
   const shouldAutoScroll = state?.autoScroll !== false;
-  requestStates.delete(result.sessionId);
+  const trace = isAgentTrace(result.trace) ? result.trace
+    : isAgentTrace(state?.trace) ? state.trace : null;
+  const traceDuration = traceDurationMs(trace);
+  const requestStartedAt = typeof state?.startedAt === 'string'
+    ? Date.parse(state.startedAt)
+    : Number.NaN;
+  const generationDurationMs = traceDuration
+    ?? (Number.isFinite(requestStartedAt) ? Math.max(0, Date.now() - requestStartedAt) : null);
+  const generationDurationProperty = generationDurationMs === null
+    ? {}
+    : { generationDurationMs };
+  const traceTab = infoState(session.id)?.tabs.find((tab) => tab.kind === 'trace');
+  if (traceTab) {
+    updateTraceTab(traceTab, {
+      trace,
+      recording: false,
+      completedAt: new Date().toISOString(),
+    });
+    refreshTraceDurationTicker();
+    if (activeSessionId === session.id) renderInfoPanel();
+  }
   let markerAlreadyPersisted = false;
   const retrievedDocumentIds = Array.isArray(result.retrievedDocumentIds)
     ? result.retrievedDocumentIds.filter((id) => typeof id === 'string' && /^[0-9a-f-]{36}$/u.test(id))
@@ -2064,6 +2887,8 @@ async function handleRequestResult(result) {
       ...(result.finishReason === 'length' ? { status: 'truncated' } : {}),
       ...(Array.isArray(result.sources) && result.sources.length > 0 ? { sources: result.sources } : {}),
       ...contextUsageProperty,
+      ...generationDurationProperty,
+      ...(trace ? { trace } : {}),
     });
   } else if (result.status === 'cancelled') {
     const partialAnswer = result.answer ?? state?.answer;
@@ -2074,6 +2899,8 @@ async function handleRequestResult(result) {
         status: 'interrupted',
         ...(Array.isArray(result.sources) && result.sources.length > 0 ? { sources: result.sources } : {}),
         ...contextUsageProperty,
+        ...generationDurationProperty,
+        ...(trace ? { trace } : {}),
       });
     }
     const lastMessage = session.messages.at(-1);
@@ -2086,6 +2913,7 @@ async function handleRequestResult(result) {
         content: 'This response was cancelled.',
         status: 'cancelled',
         ...contextUsageProperty,
+        ...(trace ? { trace } : {}),
       });
     } else if (contextUsage.length > 0) {
       session.messages[session.messages.length - 1] = {
@@ -2103,14 +2931,28 @@ async function handleRequestResult(result) {
           status: 'interrupted',
           ...(Array.isArray(result.sources) && result.sources.length > 0 ? { sources: result.sources } : {}),
           ...contextUsageProperty,
+          ...generationDurationProperty,
+          ...(trace ? { trace } : {}),
         }
       : {
           role: 'assistant',
           content: `I couldn't complete that request: ${result.error}`,
           ...contextUsageProperty,
+          ...generationDurationProperty,
+          ...(trace ? { trace } : {}),
         });
   }
 
+  if (markerAlreadyPersisted && trace) {
+    const lastMessage = session.messages.at(-1);
+    session.messages[session.messages.length - 1] = { ...lastMessage, trace };
+  }
+  if (activeSessionId === session.id) {
+    renderSession(session);
+    messages.scrollTop = shouldAutoScroll
+      ? messages.scrollHeight
+      : preservedScrollTop(previousScrollTop, messages.scrollHeight, messages.clientHeight);
+  }
   if (!markerAlreadyPersisted) {
     try {
       await saveSession(session);
@@ -2169,8 +3011,8 @@ function handleRequestChunk({ requestId, sessionId, chunk }) {
       if (wrapper && !content) {
         content = document.createElement('div');
         content.className = 'message-content';
-        wrapper.querySelector('.typing-indicator')?.remove();
         wrapper.removeAttribute('role');
+        wrapper.querySelector('.typing-indicator')?.remove();
         wrapper.append(content);
       }
       if (content) content.innerHTML = renderMarkdown(state.answer, { renderMath: false });
@@ -2185,21 +3027,40 @@ function handleRequestChunk({ requestId, sessionId, chunk }) {
 async function cancelCurrentRequest() {
   const state = requestState(activeSessionId);
   if (!state || !['queued', 'running'].includes(state.status)) return;
+  const previousStatus = state.status;
+  state.status = 'cancelling';
+  if (activeSessionId) renderSession(activeSession());
   try {
     const cancelled = await api.cancel(state.requestId);
     if (!cancelled) {
+      if (requestState(activeSessionId) === state) state.status = previousStatus;
+      if (activeSessionId) renderSession(activeSession());
       showActivity({ kind: 'error', message: 'This request has already finished.' });
       return;
     }
-    state.status = 'cancelling';
     renderSession(activeSession());
   } catch (error) {
+    if (requestState(activeSessionId) === state) state.status = previousStatus;
+    if (activeSessionId) renderSession(activeSession());
     showActivity({ kind: 'error', message: `Cancellation was requested, but its status could not be saved: ${error.message}` });
   }
 }
 
 function handleActivity(activity) {
-  if (activity.kind === 'model') {
+  if (activity.kind === 'workflow'
+    && typeof activity.sessionId === 'string'
+    && typeof activity.workflowName === 'string') {
+    const state = infoState(activity.sessionId);
+    const traceTab = state?.tabs.find((tab) => tab.kind === 'trace');
+    if (!traceTab) return;
+    traceTab.workflowSelection = {
+      id: activity.workflowId,
+      name: activity.workflowName,
+    };
+    if (activeSessionId === activity.sessionId && activeWorkspace === 'sessions') {
+      renderInfoPanel();
+    }
+  } else if (activity.kind === 'model') {
     setAssistantStatus('starting', 'Starting local AI', 'Loading the assistant for your conversation');
   } else if (activity.kind === 'ready') {
     setAssistantStatus('ready', 'Assistant ready', 'Learn more about the model and license details');
@@ -2219,7 +3080,27 @@ messages.addEventListener('scroll', () => {
   const state = requestState(activeSessionId);
   if (state) state.autoScroll = isNearScrollBottom(messages);
 });
-$('question').addEventListener('input', updateLimitMeters);
+messages.addEventListener('click', (event) => {
+  if (event.button !== 0) return;
+  const link = event.target.closest('.message-content a[href]');
+  if (!link || !activeSessionId) return;
+  let url;
+  try {
+    url = new URL(link.href);
+  } catch {
+    return;
+  }
+  if (!['https:', 'http:'].includes(url.protocol)) return;
+  event.preventDefault();
+  const browserTab = openBrowserTab(activeSessionId, url.href);
+  void api.navigateBrowser(activeSessionId, browserTab.browserTabId, url.href).catch((error) => {
+    showActivity({ kind: 'error', message: `Could not open web link: ${error.message}` });
+  });
+});
+$('question').addEventListener('input', () => {
+  resizePrompt();
+  updateLimitMeters();
+});
 $('cancel').addEventListener('click', () => void cancelCurrentRequest());
 prompt.addEventListener('keydown', (event) => {
   if (event.key === 'Enter' && !event.shiftKey) {
@@ -2233,20 +3114,310 @@ for (const button of document.querySelectorAll('[data-question]')) {
 $('new-chat').addEventListener('click', () => void createSession());
 $('session-search').addEventListener('input', renderSessions);
 $('chat-nav').addEventListener('click', () => {
-  if (window.matchMedia('(max-width: 820px)').matches) {
+  const isMobile = window.matchMedia('(max-width: 820px)').matches;
+  if (activeWorkspace !== 'sessions') {
+    setWorkspace('sessions');
+    if (isMobile) {
+      appShell.classList.add('sessions-open');
+      $('chat-nav').setAttribute('aria-expanded', 'true');
+    }
+  } else if (isMobile) {
     const isOpen = appShell.classList.toggle('sessions-open');
     $('chat-nav').setAttribute('aria-expanded', String(isOpen));
   } else {
     prompt.focus();
   }
 });
+$('workflows-nav').addEventListener('click', () => {
+  const isMobile = window.matchMedia('(max-width: 820px)').matches;
+  if (activeWorkspace === 'workflows' && isMobile) {
+    const isOpen = appShell.classList.toggle('sessions-open');
+    $('workflows-nav').setAttribute('aria-expanded', String(isOpen));
+    return;
+  }
+  setWorkspace('workflows', { openSidebar: isMobile });
+});
+$('tools-nav').addEventListener('click', () => setWorkspace('tools'));
+renderToolCards();
+$('tools-grid').addEventListener('click', (event) => {
+  const card = event.target.closest('[data-tool-id]');
+  if (!card) return;
+  const tool = TOOL_CATALOG.find((item) => item.id === card.dataset.toolId);
+  if (!tool) return;
+  $('tool-details-title').textContent = tool.name;
+  $('tool-details-description').textContent = tool.description;
+  toolDetailsDialog.showModal();
+});
+$('tool-details-close').addEventListener('click', () => toolDetailsDialog.close());
 function openSettings() {
-  if (!settingsDialog.open) settingsDialog.showModal();
+  if (!settingsDialog.open) {
+    settingsDialog.showModal();
+  }
+  queueBrowserBoundsSync();
 }
+
+function setWorkflowError(message) {
+  const error = $('workflow-error');
+  error.hidden = !message;
+  error.textContent = message ?? '';
+}
+
+function renderWorkflowList(selectedId = selectedWorkflowId) {
+  const list = $('workflow-list');
+  list.replaceChildren();
+  if (workflows.length === 0) {
+    const empty = document.createElement('p');
+    empty.className = 'workflow-list-empty';
+    empty.textContent = 'No workflows yet. Create one to give the assistant a repeatable task guide.';
+    list.append(empty);
+    return;
+  }
+  workflows.forEach((workflow, index) => {
+    const item = document.createElement('div');
+    item.className = 'workflow-list-item';
+    item.dataset.workflowId = workflow.id;
+    item.draggable = !workflowOrderSaving;
+    const select = document.createElement('button');
+    select.type = 'button';
+    select.className = 'workflow-list-select';
+    select.setAttribute('aria-pressed', String(workflow.id === selectedId));
+    const name = document.createElement('strong');
+    name.textContent = workflow.name;
+    const origin = document.createElement('span');
+    origin.textContent = `Priority ${index + 1} · ${workflow.source === 'builtin' ? 'Built-in workflow' : 'My workflow'}`;
+    select.append(name, origin);
+    const controls = document.createElement('div');
+    controls.className = 'workflow-priority-controls';
+    for (const [offset, label, glyph] of [
+      [-1, 'Move earlier', '↑'],
+      [1, 'Move later', '↓'],
+    ]) {
+      const move = document.createElement('button');
+      move.type = 'button';
+      move.dataset.workflowMove = String(offset);
+      move.setAttribute('aria-label', `${label}: ${workflow.name}`);
+      move.title = `${label}: ${workflow.name}`;
+      move.textContent = glyph;
+      move.disabled = index + offset < 0 || index + offset >= workflows.length || workflowOrderSaving;
+      controls.append(move);
+    }
+    item.append(select, controls);
+    list.append(item);
+  });
+}
+
+function setWorkflowEditor(workflow, { newWorkflow = false } = {}) {
+  selectedWorkflowId = workflow?.id ?? null;
+  workflowIsNew = !workflow && newWorkflow;
+  workflowEditorDirty = false;
+  const isBuiltIn = workflow?.source === 'builtin';
+  $('workflow-editor').hidden = !workflow && !newWorkflow;
+  $('workflow-empty').hidden = Boolean(workflow || newWorkflow);
+  $('workflow-name').value = workflow?.name ?? '';
+  $('workflow-starter').value = workflow?.starter ?? '';
+  $('workflow-steps').value = workflow?.steps.join('\n') ?? '';
+  $('workflow-goal').value = workflow?.goal ?? '';
+  for (const id of ['workflow-name', 'workflow-starter', 'workflow-steps', 'workflow-goal']) {
+    $(id).readOnly = isBuiltIn;
+  }
+  $('workflow-detail-title').textContent = workflow?.name ?? (newWorkflow ? 'New workflow' : 'Workflow details');
+  $('workflow-origin').textContent = workflow
+    ? (isBuiltIn ? 'BUILT-IN WORKFLOW' : 'YOUR WORKFLOW')
+    : (newWorkflow ? 'NEW WORKFLOW' : '');
+  $('workflow-detail-description').textContent = isBuiltIn
+    ? 'This built-in guide helps you design and save a reusable workflow from chat.'
+    : 'Edit the intent and instructions the assistant uses for this kind of task.';
+  $('workflow-delete').hidden = !workflow || workflow.source !== 'custom';
+  $('workflow-save').hidden = isBuiltIn;
+  $('workflow-save').textContent = workflowIsNew ? 'Create workflow' : 'Save workflow';
+  renderWorkflowList();
+}
+
+async function loadWorkflowPreferences() {
+  if (workflowsLoading) return;
+  workflowsLoading = true;
+  setWorkflowError('');
+  try {
+    const result = await api.listWorkflows();
+    workflows = result.workflows;
+    if (!Array.isArray(workflows)) throw new Error('The workflow list returned an invalid response.');
+    workflowsLoaded = true;
+    const workflow = workflows.find((item) => item.id === selectedWorkflowId) ?? workflows[0] ?? null;
+    setWorkflowEditor(workflow);
+    if (result.error) setWorkflowError(`Could not load saved workflow changes: ${result.error}`);
+  } catch (error) {
+    workflowsLoaded = false;
+    workflows = [];
+    setWorkflowEditor(null);
+    renderWorkflowList(null);
+    setWorkflowError(`Could not load workflows: ${error.message}`);
+  } finally {
+    workflowsLoading = false;
+  }
+}
+
+function mayDiscardWorkflowChanges() {
+  return !workflowEditorDirty
+    || window.confirm('Discard your unsaved workflow changes?');
+}
+
+function workflowEditorValue() {
+  return {
+    ...(selectedWorkflowId ? { id: selectedWorkflowId } : {}),
+    name: $('workflow-name').value,
+    starter: $('workflow-starter').value,
+    steps: $('workflow-steps').value.split(/\r?\n/u).map((step) => step.trim()).filter(Boolean),
+    goal: $('workflow-goal').value,
+  };
+}
+
+async function saveWorkflowOrder(nextWorkflows) {
+  if (workflowOrderSaving) return;
+  const previousWorkflows = workflows;
+  workflowOrderSaving = true;
+  workflows = nextWorkflows;
+  renderWorkflowList();
+  try {
+    const result = await api.reorderWorkflows(workflows.map(({ id }) => id));
+    if (!Array.isArray(result.workflows)) throw new Error('The reordered workflow list returned an invalid response.');
+    workflows = result.workflows;
+    setWorkflowError('');
+  } catch (error) {
+    workflows = previousWorkflows;
+    setWorkflowError(`Could not update workflow priority: ${error.message}`);
+  } finally {
+    workflowOrderSaving = false;
+    renderWorkflowList();
+  }
+}
+
+function moveWorkflow(workflowId, targetId, after = false) {
+  if (workflowOrderSaving || workflowId === targetId) return;
+  const nextWorkflows = [...workflows];
+  const fromIndex = nextWorkflows.findIndex((workflow) => workflow.id === workflowId);
+  const targetIndex = nextWorkflows.findIndex((workflow) => workflow.id === targetId);
+  if (fromIndex < 0 || targetIndex < 0) return;
+  const [workflow] = nextWorkflows.splice(fromIndex, 1);
+  const insertionIndex = nextWorkflows.findIndex((item) => item.id === targetId) + Number(after);
+  nextWorkflows.splice(insertionIndex, 0, workflow);
+  void saveWorkflowOrder(nextWorkflows);
+}
+
+$('workflow-list').addEventListener('click', (event) => {
+  const item = event.target.closest('.workflow-list-item');
+  if (!item) return;
+  const moveButton = event.target.closest('[data-workflow-move]');
+  if (moveButton) {
+    moveWorkflow(
+      item.dataset.workflowId,
+      workflows[workflows.findIndex((workflow) => workflow.id === item.dataset.workflowId)
+        + Number(moveButton.dataset.workflowMove)]?.id,
+      Number(moveButton.dataset.workflowMove) > 0,
+    );
+    return;
+  }
+  if (!event.target.closest('.workflow-list-select')) return;
+  if (item.dataset.workflowId === selectedWorkflowId && !workflowIsNew) return;
+  if (!mayDiscardWorkflowChanges()) {
+    renderWorkflowList();
+    return;
+  }
+  const workflow = workflows.find((candidate) => candidate.id === item.dataset.workflowId) ?? null;
+  setWorkflowEditor(workflow);
+  setWorkflowError('');
+});
+
+$('workflow-list').addEventListener('dragstart', (event) => {
+  const item = event.target.closest('.workflow-list-item');
+  if (!item || workflowOrderSaving) {
+    event.preventDefault();
+    return;
+  }
+  draggedWorkflowId = item.dataset.workflowId;
+  item.classList.add('is-dragging');
+  event.dataTransfer.effectAllowed = 'move';
+  event.dataTransfer.setData('text/plain', draggedWorkflowId);
+});
+
+$('workflow-list').addEventListener('dragover', (event) => {
+  const item = event.target.closest('.workflow-list-item');
+  if (!item || !draggedWorkflowId || item.dataset.workflowId === draggedWorkflowId) return;
+  event.preventDefault();
+  const rect = item.getBoundingClientRect();
+  item.classList.toggle('is-drop-before', event.clientY < rect.top + rect.height / 2);
+  item.classList.toggle('is-drop-after', event.clientY >= rect.top + rect.height / 2);
+  event.dataTransfer.dropEffect = 'move';
+});
+
+$('workflow-list').addEventListener('drop', (event) => {
+  const item = event.target.closest('.workflow-list-item');
+  if (!item || !draggedWorkflowId || item.dataset.workflowId === draggedWorkflowId) return;
+  event.preventDefault();
+  const rect = item.getBoundingClientRect();
+  moveWorkflow(draggedWorkflowId, item.dataset.workflowId, event.clientY >= rect.top + rect.height / 2);
+  draggedWorkflowId = null;
+  for (const row of $('workflow-list').querySelectorAll('.workflow-list-item')) {
+    row.classList.remove('is-dragging', 'is-drop-before', 'is-drop-after');
+  }
+});
+
+$('workflow-list').addEventListener('dragend', () => {
+  draggedWorkflowId = null;
+  for (const row of $('workflow-list').querySelectorAll('.workflow-list-item')) {
+    row.classList.remove('is-dragging', 'is-drop-before', 'is-drop-after');
+  }
+});
+
+$('workflow-new').addEventListener('click', () => {
+  if (!mayDiscardWorkflowChanges()) return;
+  setWorkflowEditor(null, { newWorkflow: true });
+  $('workflow-name').focus();
+  setWorkflowError('');
+});
+
+for (const id of ['workflow-name', 'workflow-starter', 'workflow-steps', 'workflow-goal']) {
+  $(id).addEventListener('input', () => {
+    workflowEditorDirty = true;
+    setWorkflowError('');
+  });
+}
+
+$('workflow-save').addEventListener('click', async () => {
+  const button = $('workflow-save');
+  button.disabled = true;
+  setWorkflowError('');
+  try {
+    const result = await api.saveWorkflow(workflowEditorValue());
+    workflows = result.workflows;
+    setWorkflowEditor(workflows.find((workflow) => workflow.id === result.saved.id) ?? null);
+    setWorkflowError('');
+  } catch (error) {
+    setWorkflowError(`Could not save the workflow: ${error.message}`);
+  } finally {
+    button.disabled = false;
+  }
+});
+
+$('workflow-delete').addEventListener('click', async () => {
+  const workflow = workflows.find((item) => item.id === selectedWorkflowId);
+  if (!workflow || workflow.source !== 'custom'
+    || !window.confirm(`Delete the workflow “${workflow.name}”?`)) return;
+  try {
+    const result = await api.deleteWorkflow(workflow.id);
+    workflows = result.workflows;
+    const next = workflows[0] ?? null;
+    setWorkflowEditor(next);
+    setWorkflowError('');
+  } catch (error) {
+    setWorkflowError(`Could not delete the workflow: ${error.message}`);
+  }
+});
 
 $('settings-button').addEventListener('click', openSettings);
 api.onOpenSettings(openSettings);
-$('settings-close').addEventListener('click', () => settingsDialog.close());
+$('settings-close').addEventListener('click', () => {
+  settingsDialog.close();
+});
 $('document-viewer-close').addEventListener('click', () => documentViewerDialog.close());
 $('activity-clear').addEventListener('click', () => showActivity({ kind: 'complete', message: '' }));
 removeDocumentDialog.addEventListener('close', () => {
@@ -2290,6 +3461,7 @@ for (const button of document.querySelectorAll('[data-theme-choice]')) {
   });
 }
 $('info-toggle').addEventListener('click', () => {
+  if (activeWorkspace !== 'sessions') return;
   if (appShell.classList.contains('info-collapsed')) openInfoPanel();
   else closeInfoPanel();
 });
@@ -2309,20 +3481,43 @@ $('composer-document-menu').addEventListener('click', (event) => {
   const sessionId = activeSessionId;
   if (button.dataset.composerDocumentAdd === 'files') void importDocuments(sessionId);
   else if (button.dataset.composerDocumentAdd === 'folder') void addDocumentFolder(sessionId);
+  else if (button.dataset.composerDocumentAdd === 'website' && sessionId) {
+    openBrowserTab(sessionId, '', { select: true });
+  } else if (button.dataset.composerDocumentAdd === 'web-search' && sessionId) {
+    openWebSearchTab(sessionId);
+  }
 });
 $('info-add-tab').addEventListener('click', () => {
   const menu = $('info-add-menu');
   const open = menu.hidden;
+  const state = activeSessionId ? infoState(activeSessionId) : null;
+  menu.querySelector('[data-add-info-tab="documents"]').hidden =
+    state?.tabs.some((tab) => tab.kind === 'documents') ?? false;
+  menu.querySelector('[data-add-info-tab="web-search"]').hidden =
+    state?.tabs.some((tab) => tab.kind === 'web-search') ?? false;
   menu.hidden = !open;
   $('info-add-tab').setAttribute('aria-expanded', String(open));
 });
+for (const button of document.querySelectorAll('[data-add-info-tab]')) {
+  button.prepend(createInfoTabIcon(button.dataset.addInfoTab));
+}
 $('info-add-menu').addEventListener('click', (event) => {
   const button = event.target.closest('[data-add-info-tab]');
   if (!button) return;
   $('info-add-menu').hidden = true;
   $('info-add-tab').setAttribute('aria-expanded', 'false');
-  if (button.dataset.addInfoTab === 'documents') openDocumentLibraryTab();
-  else if (button.dataset.addInfoTab === 'terminal' && activeSessionId) void addTerminalTab(activeSessionId);
+  if (button.dataset.addInfoTab === 'terminal' && activeSessionId) void addTerminalTab(activeSessionId);
+  else if (button.dataset.addInfoTab === 'browser' && activeSessionId) openBrowserTab(activeSessionId);
+  else if (button.dataset.addInfoTab === 'web-search' && activeSessionId) {
+    const state = infoState(activeSessionId);
+    if (!state.tabs.some((tab) => tab.kind === 'web-search')) openWebSearchTab(activeSessionId);
+  }
+  else if (button.dataset.addInfoTab === 'documents' && activeSessionId) {
+    const state = infoState(activeSessionId);
+    if (!state.tabs.some((tab) => tab.kind === 'documents')) {
+      openDocumentLibraryTab(activeSessionId);
+    }
+  }
 });
 document.addEventListener('click', (event) => {
   for (const menu of document.querySelectorAll('.document-add-menu:not([hidden])')) {
@@ -2366,13 +3561,79 @@ api.onTerminalCommandRequest((request) => {
 api.onDocumentEditRequest((request) => {
   void handleDocumentEditRequest(request);
 });
+api.onBrowserState((state) => {
+  if (!state || typeof state.sessionId !== 'string'
+    || typeof state.browserTabId !== 'string') return;
+  browserStates.set(JSON.stringify([state.sessionId, state.browserTabId]), state);
+  const tab = infoSessions.get(state.sessionId)?.tabs.find((candidate) =>
+    candidate.kind === 'browser' && candidate.browserTabId === state.browserTabId);
+  if (tab) {
+    tab.title = state.title || browserTitleFromUrl(state.url);
+    const tabButton = document.getElementById(`info-tab-${tab.id}`);
+    if (tabButton) {
+      tabButton.setAttribute('aria-label', tab.title);
+      tabButton.title = tab.title;
+    }
+    const closeButton = document.getElementById(`info-tab-close-${tab.id}`);
+    if (closeButton) {
+      closeButton.setAttribute('aria-label', `Close ${tab.title}`);
+      closeButton.title = `Close ${tab.title}`;
+    }
+    if (activeSessionId === state.sessionId) renderBrowserSurface(tab);
+  }
+  queueBrowserBoundsSync();
+});
+api.onBrowserActivate((request) => {
+  if (!request || typeof request.sessionId !== 'string'
+    || typeof request.browserTabId !== 'string') return;
+  ensureBrowserTab(request.sessionId, request.browserTabId, request.url);
+});
+api.onWebSearchResults((event) => {
+  if (!event || typeof event.sessionId !== 'string') return;
+  showWebSearchResults(event.sessionId, event.resultSet);
+});
 $('setup-later').addEventListener('click', () => setupDialog.close());
 $('setup-start').addEventListener('click', () => setupDialog.close());
 api.onActivity((activity) => {
   handleActivity(activity);
 });
+api.onWorkflowCreated((result) => {
+  if (!result || typeof result.sessionId !== 'string'
+    || !Array.isArray(result.workflows) || !result.workflow
+    || typeof result.workflow.id !== 'string') return;
+  workflows = result.workflows;
+  workflowsLoaded = true;
+  const created = workflows.find((workflow) => workflow.id === result.workflow.id);
+  if (!created) {
+    setWorkflowError('The workflow was saved, but it could not be found in the updated workflow list.');
+    setWorkspace('workflows', { openSidebar: window.matchMedia('(max-width: 820px)').matches });
+    return;
+  }
+  if (workflowEditorDirty) {
+    renderWorkflowList();
+    setWorkflowError(`Created “${created.name}”. Save or discard the current edits to open it.`);
+  } else {
+    setWorkflowEditor(created);
+    setWorkflowError('');
+  }
+  setWorkspace('workflows', { openSidebar: window.matchMedia('(max-width: 820px)').matches });
+});
+api.onWorkflowsUpdated((updatedWorkflows) => {
+  if (!Array.isArray(updatedWorkflows)) return;
+  workflows = updatedWorkflows;
+  workflowsLoaded = true;
+  if (!workflowEditorDirty && !workflowIsNew) {
+    const selected = workflows.find((workflow) => workflow.id === selectedWorkflowId)
+      ?? workflows[0]
+      ?? null;
+    setWorkflowEditor(selected);
+  } else {
+    renderWorkflowList();
+  }
+});
 api.onRequestStatus(handleRequestStatus);
 api.onRequestChunk(handleRequestChunk);
+api.onRequestTrace(handleRequestTrace);
 api.onRequestResult((result) => void handleRequestResult(result));
 initializePanelWidths();
 installPanelResizer('sessions');
@@ -2384,7 +3645,16 @@ window.addEventListener('resize', () => {
       || PANEL_WIDTHS[panel].fallback;
     setPanelWidth(panel, clampPanelWidth(panel, width));
   }
+  resizePrompt();
   for (const tab of infoSessions.get(activeSessionId)?.tabs ?? []) fitTerminal(tab);
+  queueBrowserBoundsSync();
 });
+resizePrompt();
+const browserBoundsObserver = new ResizeObserver(queueBrowserBoundsSync);
+browserBoundsObserver.observe($('info-panel'));
+for (const dialog of document.querySelectorAll('dialog')) {
+  dialog.addEventListener('toggle', queueBrowserBoundsSync);
+  dialog.addEventListener('close', queueBrowserBoundsSync);
+}
 applyTheme(localStorage.getItem('livingwords-theme') ?? 'dark');
 void initializeRenderer();

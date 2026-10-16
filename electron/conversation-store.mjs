@@ -13,15 +13,213 @@ const MAX_SOURCES_PER_MESSAGE = 100;
 const MAX_SOURCE_EXCERPT_LENGTH = 12_000;
 const MAX_CONTEXT_USAGE_PER_MESSAGE = 100;
 const MAX_CONTEXT_USAGE_EXCERPT_LENGTH = 1_600;
+const MAX_TRACE_BYTES = 1_000_000;
+const MAX_TRACE_STEPS = 20;
+const MAX_TRACE_COLLECTION_ITEMS = 100;
 const DOCUMENT_ID_PATTERN = /^[0-9a-f-]{36}$/u;
 const CONTEXT_USAGE_METHODS = new Set([
   'attached-document',
   'document-search',
   'document-read',
+  'folder-overview',
   'folder-instructions',
   'folder-read',
   'folder-grep',
 ]);
+const AGENT_STEP_STATUSES = new Set(['success', 'failed', 'rejected', 'complete', 'needs_human']);
+
+function isRecord(value) {
+  return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
+}
+
+function traceString(value, name, maxLength = 12_000, allowEmpty = true) {
+  if (typeof value !== 'string' || (!allowEmpty && value.length === 0) || value.length > maxLength) {
+    throw new Error(`Conversation contains an invalid agent trace ${name}.`);
+  }
+  return value;
+}
+
+function validateTraceJson(value, depth = 0, budget = { nodes: 10_000 }) {
+  budget.nodes -= 1;
+  if (budget.nodes < 0 || depth > 12) throw new Error('Conversation agent trace contains overly complex data.');
+  if (value === null || typeof value === 'boolean') return value;
+  if (typeof value === 'string') return traceString(value, 'value', 12_000);
+  if (typeof value === 'number' && Number.isFinite(value)) return value;
+  if (Array.isArray(value)) {
+    if (value.length > MAX_TRACE_COLLECTION_ITEMS) throw new Error('Conversation agent trace contains too many values.');
+    return value.map((item) => validateTraceJson(item, depth + 1, budget));
+  }
+  if (!isRecord(value)) throw new Error('Conversation agent trace contains non-JSON data.');
+  const entries = Object.entries(value);
+  if (entries.length > MAX_TRACE_COLLECTION_ITEMS
+    || entries.some(([key]) => key === '__proto__' || key === 'constructor' || key === 'prototype')) {
+    throw new Error('Conversation agent trace contains invalid object data.');
+  }
+  return Object.fromEntries(entries.map(([key, child]) => [
+    traceString(key, 'object key', 256, false),
+    validateTraceJson(child, depth + 1, budget),
+  ]));
+}
+
+function validateTrace(trace) {
+  if (!isRecord(trace) || trace.schema_version !== 1
+    || typeof trace.run_id !== 'string' || !trace.run_id || trace.run_id.length > 128
+    || typeof trace.task !== 'string' || !trace.task || trace.task.length > 12_000
+    || typeof trace.started_at !== 'string' || !Number.isFinite(Date.parse(trace.started_at))
+    || typeof trace.completed_at !== 'string' || !Number.isFinite(Date.parse(trace.completed_at))
+    || !Array.isArray(trace.steps) || trace.steps.length > MAX_TRACE_STEPS) {
+    throw new Error('Conversation contains an invalid agent trace.');
+  }
+  let serialized;
+  try {
+    serialized = JSON.stringify(trace);
+  } catch (error) {
+    throw new Error('Conversation agent trace cannot be serialized.', { cause: error });
+  }
+  if (typeof serialized !== 'string' || Buffer.byteLength(serialized, 'utf8') > MAX_TRACE_BYTES) {
+    throw new Error('Conversation agent trace exceeds the local storage limit.');
+  }
+
+  const steps = trace.steps.map((step, index) => {
+    if (!isRecord(step) || step.step_number !== index + 1
+      || typeof step.timestamp !== 'string' || !Number.isFinite(Date.parse(step.timestamp))
+      || !(step.thought === null || typeof step.thought === 'string' && step.thought.length <= 12_000)
+      || !(step.tool_calls === null || Array.isArray(step.tool_calls)
+        && step.tool_calls.length <= MAX_TRACE_COLLECTION_ITEMS)
+      || !(step.observation === null || Array.isArray(step.observation)
+        && step.observation.length <= MAX_TRACE_COLLECTION_ITEMS)
+      || !(step.error === null || typeof step.error === 'string' && step.error.length <= 12_000)
+      || !AGENT_STEP_STATUSES.has(step.status)
+      || !(step.token_usage === null || isRecord(step.token_usage))
+      || !Number.isFinite(step.latency_ms) || step.latency_ms < 0
+      || !Array.isArray(step.guardrail_decisions) || step.guardrail_decisions.length > MAX_TRACE_COLLECTION_ITEMS
+      || !Array.isArray(step.verification) || step.verification.length > MAX_TRACE_COLLECTION_ITEMS
+      || (step.tool_events !== undefined && (!Array.isArray(step.tool_events)
+        || step.tool_events.length > MAX_TRACE_COLLECTION_ITEMS))
+      || !(step.final_answer === null || typeof step.final_answer === 'string' && step.final_answer.length <= 24_000)
+      || !(step.context_compaction === null
+        || typeof step.context_compaction === 'string' && step.context_compaction.length <= 12_000)) {
+      throw new Error('Conversation contains an invalid agent trace step.');
+    }
+    const toolCalls = step.tool_calls?.map((call) => {
+      if (!isRecord(call) || typeof call.name !== 'string' || !call.name || call.name.length > 256
+        || !Object.hasOwn(call, 'arguments')
+        || (call.id !== undefined && (typeof call.id !== 'string' || call.id.length > 256))) {
+        throw new Error('Conversation agent trace contains an invalid tool call.');
+      }
+      return {
+        name: call.name,
+        arguments: validateTraceJson(call.arguments),
+        ...(call.id !== undefined ? { id: call.id } : {}),
+      };
+    }) ?? null;
+    const observations = step.observation?.map((observation) => {
+      if (!isRecord(observation) || typeof observation.name !== 'string' || !observation.name
+        || observation.name.length > 256 || !['success', 'failed', 'not_executed'].includes(observation.status)
+        || (observation.error !== undefined
+          && (typeof observation.error !== 'string' || observation.error.length > 12_000))
+        || (observation.result !== undefined && observation.status !== 'success')) {
+        throw new Error('Conversation agent trace contains an invalid observation.');
+      }
+      return {
+        name: observation.name,
+        status: observation.status,
+        ...(observation.result !== undefined ? { result: validateTraceJson(observation.result) } : {}),
+        ...(observation.error !== undefined ? { error: observation.error } : {}),
+      };
+    }) ?? null;
+    const tokenUsage = step.token_usage === null ? null : Object.fromEntries(
+      ['input_tokens', 'output_tokens', 'total_tokens']
+        .filter((key) => step.token_usage[key] !== undefined)
+        .map((key) => {
+          if (!Number.isSafeInteger(step.token_usage[key]) || step.token_usage[key] < 0) {
+            throw new Error('Conversation agent trace contains invalid token usage.');
+          }
+          return [key, step.token_usage[key]];
+        }),
+    );
+    if (step.token_usage && Object.keys(tokenUsage).length === 0) {
+      throw new Error('Conversation agent trace contains invalid token usage.');
+    }
+    const guardrailDecisions = step.guardrail_decisions.map((decision) => {
+      if (!isRecord(decision) || typeof decision.rule !== 'string' || !decision.rule
+        || decision.rule.length > 256
+        || !['allowed', 'rejected', 'needs_human', 'stopped'].includes(decision.decision)
+        || typeof decision.details !== 'string' || decision.details.length > 12_000
+        || (decision.tool_name !== undefined
+          && (typeof decision.tool_name !== 'string' || decision.tool_name.length > 256))) {
+        throw new Error('Conversation agent trace contains an invalid guardrail decision.');
+      }
+      return {
+        rule: decision.rule,
+        decision: decision.decision,
+        details: decision.details,
+        ...(decision.tool_name !== undefined ? { tool_name: decision.tool_name } : {}),
+      };
+    });
+    const verification = step.verification.map((item) => {
+      if (!isRecord(item) || !['passed', 'failed', 'skipped'].includes(item.status)
+        || typeof item.details !== 'string' || item.details.length > 12_000
+        || !['tool', 'run'].includes(item.phase)
+        || (item.tool_name !== undefined && (typeof item.tool_name !== 'string' || item.tool_name.length > 256))) {
+        throw new Error('Conversation agent trace contains an invalid verification result.');
+      }
+      return {
+        status: item.status,
+        details: item.details,
+        phase: item.phase,
+        ...(item.tool_name !== undefined ? { tool_name: item.tool_name } : {}),
+      };
+    });
+    const toolEvents = step.tool_events?.map((event) => {
+      if (!isRecord(event) || !Number.isSafeInteger(event.step_number) || event.step_number !== step.step_number
+        || !Number.isSafeInteger(event.call_index) || event.call_index < 0
+        || typeof event.tool_name !== 'string' || !event.tool_name || event.tool_name.length > 256
+        || typeof event.timestamp !== 'string' || !Number.isFinite(Date.parse(event.timestamp))
+        || !['pending', 'running', 'success', 'failed', 'rejected', 'needs_human', 'not_executed'].includes(event.status)
+        || !Object.hasOwn(event, 'arguments')
+        || (event.error !== undefined && (typeof event.error !== 'string' || event.error.length > 12_000))
+        || (event.result !== undefined && event.status !== 'success')) {
+        throw new Error('Conversation agent trace contains an invalid tool event.');
+      }
+      return {
+        step_number: event.step_number,
+        call_index: event.call_index,
+        tool_name: event.tool_name,
+        timestamp: event.timestamp,
+        arguments: event.arguments === null ? null : validateTraceJson(event.arguments),
+        status: event.status,
+        ...(event.result !== undefined ? { result: validateTraceJson(event.result) } : {}),
+        ...(event.error !== undefined ? { error: event.error } : {}),
+      };
+    });
+    return {
+      step_number: step.step_number,
+      timestamp: step.timestamp,
+      thought: step.thought,
+      tool_calls: toolCalls,
+      observation: observations,
+      error: step.error,
+      status: step.status,
+      token_usage: tokenUsage,
+      latency_ms: step.latency_ms,
+      guardrail_decisions: guardrailDecisions,
+      verification,
+      ...(toolEvents !== undefined ? { tool_events: toolEvents } : {}),
+      final_answer: step.final_answer,
+      context_compaction: step.context_compaction,
+    };
+  });
+
+  return {
+    schema_version: 1,
+    run_id: trace.run_id,
+    task: trace.task,
+    started_at: trace.started_at,
+    completed_at: trace.completed_at,
+    steps,
+  };
+}
 
 function validateSources(message) {
   if (message.sources === undefined) return undefined;
@@ -85,6 +283,16 @@ function validateContextUsage(message) {
   });
 }
 
+function validateGenerationDuration(message) {
+  if (message.generationDurationMs === undefined) return undefined;
+  if (message.role !== 'assistant'
+    || !Number.isSafeInteger(message.generationDurationMs)
+    || message.generationDurationMs < 0) {
+    throw new Error('Conversation contains an invalid response generation duration.');
+  }
+  return message.generationDurationMs;
+}
+
 function validateSession(session) {
   if (!session || typeof session !== 'object'
     || typeof session.id !== 'string' || !session.id
@@ -124,6 +332,12 @@ function validateSession(session) {
     contentLength += message.content.length;
     const sources = validateSources(message);
     const contextUsage = validateContextUsage(message);
+    const generationDurationMs = validateGenerationDuration(message);
+    const trace = message.trace === undefined ? undefined : validateTrace(message.trace);
+    if (trace !== undefined) {
+      if (message.role !== 'assistant') throw new Error('Only assistant responses can contain an agent trace.');
+      contentLength += Buffer.byteLength(JSON.stringify(trace), 'utf8');
+    }
     if (sources) {
       contentLength += sources.reduce((total, source) => total + source.excerpt.length, 0);
     }
@@ -137,6 +351,8 @@ function validateSession(session) {
       ...(message.status !== undefined ? { status: message.status } : {}),
       ...(sources !== undefined ? { sources } : {}),
       ...(contextUsage !== undefined ? { contextUsage } : {}),
+      ...(generationDurationMs !== undefined ? { generationDurationMs } : {}),
+      ...(trace !== undefined ? { trace } : {}),
     };
   });
 

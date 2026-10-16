@@ -5,6 +5,29 @@ contextBridge.exposeInMainWorld('livingWords', Object.freeze({
   getContextWindow: () => ipcRenderer.invoke('livingwords:context-window:get'),
   setContextWindow: (contextWindowTokens) =>
     ipcRenderer.invoke('livingwords:context-window:set', contextWindowTokens),
+  getWebSearchSettings: (provider) => ipcRenderer.invoke('livingwords:web-search-settings:get', provider),
+  setWebSearchSettings: (provider) =>
+    ipcRenderer.invoke('livingwords:web-search-settings:set', provider),
+  searchWeb: (sessionId, query) =>
+    ipcRenderer.invoke('livingwords:web-search:query', sessionId, query),
+  listWorkflows: () => ipcRenderer.invoke('livingwords:workflows:list'),
+  saveWorkflow: (workflow) => ipcRenderer.invoke('livingwords:workflows:save', workflow),
+  reorderWorkflows: (ids) => ipcRenderer.invoke('livingwords:workflows:reorder', ids),
+  deleteWorkflow: (id) => ipcRenderer.invoke('livingwords:workflows:delete', id),
+  setBrowserBounds: (sessionId, browserTabId, bounds, visible, viewportSize) =>
+    ipcRenderer.invoke('livingwords:browser:bounds', sessionId, browserTabId, bounds, visible, viewportSize),
+  searchBrowser: (sessionId, browserTabId, query) =>
+    ipcRenderer.invoke('livingwords:browser:search', sessionId, browserTabId, query),
+  navigateBrowser: (sessionId, browserTabId, url) =>
+    ipcRenderer.invoke('livingwords:browser:navigate', sessionId, browserTabId, url),
+  browserBack: (sessionId, browserTabId) =>
+    ipcRenderer.invoke('livingwords:browser:back', sessionId, browserTabId),
+  browserForward: (sessionId, browserTabId) =>
+    ipcRenderer.invoke('livingwords:browser:forward', sessionId, browserTabId),
+  reloadBrowser: (sessionId, browserTabId) =>
+    ipcRenderer.invoke('livingwords:browser:reload', sessionId, browserTabId),
+  closeBrowser: (sessionId, browserTabId) =>
+    ipcRenderer.invoke('livingwords:browser:close', sessionId, browserTabId),
   readClipboardText: () => ipcRenderer.invoke('livingwords:clipboard:read-text'),
   writeClipboardText: (text) => ipcRenderer.invoke('livingwords:clipboard:write-text', text),
   listDocuments: (sessionId) => ipcRenderer.invoke('livingwords:documents:list', sessionId),
@@ -18,8 +41,8 @@ contextBridge.exposeInMainWorld('livingWords', Object.freeze({
   createSession: () => ipcRenderer.invoke('livingwords:sessions:create'),
   saveSession: (session) => ipcRenderer.invoke('livingwords:sessions:save', session),
   deleteSession: (id) => ipcRenderer.invoke('livingwords:sessions:delete', id),
-  ask: (requestId, sessionId, question, history, terminalContext) =>
-    ipcRenderer.invoke('livingwords:ask', requestId, sessionId, question, history, terminalContext),
+  ask: (requestId, sessionId, question, history, rightPanelTabs) =>
+    ipcRenderer.invoke('livingwords:ask', requestId, sessionId, question, history, rightPanelTabs),
   createTerminal: (request) => ipcRenderer.invoke('livingwords:terminal:create', request),
   writeTerminal: (terminalId, data) => ipcRenderer.invoke('livingwords:terminal:write', terminalId, data),
   resizeTerminal: (terminalId, cols, rows) =>
@@ -54,6 +77,18 @@ contextBridge.exposeInMainWorld('livingWords', Object.freeze({
     ipcRenderer.on('livingwords:document:edit-request', handler);
     return () => ipcRenderer.removeListener('livingwords:document:edit-request', handler);
   },
+  onWorkflowCreated: (listener) => {
+    if (typeof listener !== 'function') throw new TypeError('Workflow created listener must be a function.');
+    const handler = (_event, request) => listener(request);
+    ipcRenderer.on('livingwords:workflow:created', handler);
+    return () => ipcRenderer.removeListener('livingwords:workflow:created', handler);
+  },
+  onWorkflowsUpdated: (listener) => {
+    if (typeof listener !== 'function') throw new TypeError('Workflows updated listener must be a function.');
+    const handler = (_event, workflows) => listener(workflows);
+    ipcRenderer.on('livingwords:workflows:updated', handler);
+    return () => ipcRenderer.removeListener('livingwords:workflows:updated', handler);
+  },
   cancel: (requestId) => ipcRenderer.invoke('livingwords:cancel', requestId),
   onOpenSettings: (listener) => {
     if (typeof listener !== 'function') throw new TypeError('Settings listener must be a function.');
@@ -85,10 +120,34 @@ contextBridge.exposeInMainWorld('livingWords', Object.freeze({
     ipcRenderer.on('livingwords:request-chunk', handler);
     return () => ipcRenderer.removeListener('livingwords:request-chunk', handler);
   },
+  onRequestTrace: (listener) => {
+    if (typeof listener !== 'function') throw new TypeError('Request trace listener must be a function.');
+    const handler = (_event, traceUpdate) => listener(traceUpdate);
+    ipcRenderer.on('livingwords:request-trace', handler);
+    return () => ipcRenderer.removeListener('livingwords:request-trace', handler);
+  },
   onRequestResult: (listener) => {
     if (typeof listener !== 'function') throw new TypeError('Request result listener must be a function.');
     const handler = (_event, result) => listener(result);
     ipcRenderer.on('livingwords:request-result', handler);
     return () => ipcRenderer.removeListener('livingwords:request-result', handler);
+  },
+  onBrowserState: (listener) => {
+    if (typeof listener !== 'function') throw new TypeError('Browser state listener must be a function.');
+    const handler = (_event, state) => listener(state);
+    ipcRenderer.on('livingwords:browser:state', handler);
+    return () => ipcRenderer.removeListener('livingwords:browser:state', handler);
+  },
+  onBrowserActivate: (listener) => {
+    if (typeof listener !== 'function') throw new TypeError('Browser activation listener must be a function.');
+    const handler = (_event, request) => listener(request);
+    ipcRenderer.on('livingwords:browser:activate', handler);
+    return () => ipcRenderer.removeListener('livingwords:browser:activate', handler);
+  },
+  onWebSearchResults: (listener) => {
+    if (typeof listener !== 'function') throw new TypeError('Web search results listener must be a function.');
+    const handler = (_event, event) => listener(event);
+    ipcRenderer.on('livingwords:web-search:results', handler);
+    return () => ipcRenderer.removeListener('livingwords:web-search:results', handler);
   },
 }));

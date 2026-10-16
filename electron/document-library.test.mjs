@@ -526,6 +526,33 @@ test('text edits require a review token, update only after apply, and reject sta
   }
 });
 
+test('a failed local-index preflight leaves the attached source unchanged', async () => {
+  const directory = await mkdtemp(join(tmpdir(), 'livingwords-edit-cache-error-'));
+  const libraryPath = join(directory, 'library');
+  const sourcePath = join(directory, 'notes.txt');
+  const original = 'Original words in this local file.';
+  await writeFile(sourcePath, original);
+  const library = createDocumentLibrary(libraryPath);
+
+  try {
+    const [reference] = (await library.addFiles([sourcePath], 'conversation-one')).added;
+    const [file] = await library.retrieve('conversation-one', [reference.id], 'original words');
+    const proposal = await library.prepareEdit('conversation-one', file.documentId, 'Updated words in this local file.');
+    const cacheDirectory = join(libraryPath, 'cache');
+    const [sessionCacheName] = await readdir(cacheDirectory);
+    const sessionCache = join(cacheDirectory, sessionCacheName);
+    const externalCache = join(directory, 'external-cache');
+    await rm(sessionCache, { recursive: true, force: true });
+    await mkdir(externalCache);
+    await symlink(externalCache, sessionCache, 'dir');
+
+    await assert.rejects(library.applyEdit(proposal.proposalId, 'conversation-one'), /symbolic link/u);
+    assert.equal(await readFile(sourcePath, 'utf8'), original);
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
 test('PDF references retain page provenance and cannot be edited in place', async () => {
   const directory = await mkdtemp(join(tmpdir(), 'livingwords-pdf-'));
   const pdfPath = join(directory, 'book.pdf');
@@ -657,6 +684,37 @@ test('conversation deletion removes references and indexes but never originals, 
     assert.equal((await library.list('conversation-one')).references.length, 0);
     assert.equal(await readFile(sourcePath, 'utf8'), 'Conversation-specific content.');
     assert.deepEqual(await readdir(join(libraryPath, 'cache')), []);
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
+test('reference removal rolls back metadata without discarding cached document indexes', async () => {
+  const directory = await mkdtemp(join(tmpdir(), 'livingwords-reference-remove-'));
+  const sourcePath = join(directory, 'source.txt');
+  const libraryPath = join(directory, 'library');
+  const sessionId = 'conversation-one';
+  await writeFile(sourcePath, 'Keep this attached file indexed after a failed detach.');
+  const library = createDocumentLibrary(libraryPath);
+
+  try {
+    const [reference] = (await library.addFiles([sourcePath], sessionId)).added;
+    const [file] = await library.retrieve(sessionId, [reference.id], 'failed detach');
+    const [cacheSession] = await readdir(join(libraryPath, 'cache'));
+    const cachePath = join(libraryPath, 'cache', cacheSession);
+    const cachedFiles = (await readdir(cachePath)).sort();
+
+    await assert.rejects(
+      library.remove(reference.id, sessionId, async () => {
+        throw new Error('Conversation update failed.');
+      }),
+      /Conversation update failed/u,
+    );
+
+    assert.deepEqual((await library.listCached(sessionId)).references.map(({ id }) => id), [reference.id]);
+    assert.deepEqual((await readdir(cachePath)).sort(), cachedFiles);
+    assert.ok((await library.search(sessionId, [reference.id], 'failed detach'))
+      .some((source) => source.documentId === file.documentId));
   } finally {
     await rm(directory, { recursive: true, force: true });
   }

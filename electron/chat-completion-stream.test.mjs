@@ -55,6 +55,36 @@ test('chat completion stream assembles structured terminal tool calls', async ()
   });
 });
 
+test('chat completion stream captures reasoning content separately from the answer', async () => {
+  const chunks = [];
+  const body = streamFrom([
+    'data: {"choices":[{"delta":{"reasoning_content":"Consider "},"finish_reason":null}]}\n\n',
+    'data: {"choices":[{"delta":{"reasoning":"the evidence."},"finish_reason":null}]}\n\n',
+    'data: {"choices":[{"delta":{"content":"Here is the answer."},"finish_reason":"stop"}]}\n\n',
+  ]);
+
+  const result = await readChatCompletionStream(body, (chunk) => chunks.push(chunk));
+
+  assert.deepEqual(chunks, ['Here is the answer.']);
+  assert.deepEqual(result, {
+    answer: 'Here is the answer.',
+    finishReason: 'stop',
+    toolCalls: [],
+    reasoning: 'Consider the evidence.',
+  });
+});
+
+test('chat completion stream moves think tags from the answer into reasoning', async () => {
+  const body = streamFrom([
+    'data: {"choices":[{"delta":{"content":"<think>Check the source.</think>Done."},"finish_reason":"stop"}]}\n\n',
+  ]);
+
+  const result = await readChatCompletionStream(body, () => {});
+
+  assert.equal(result.answer, 'Done.');
+  assert.equal(result.reasoning, 'Check the source.');
+});
+
 test('chat completion stream reports malformed events and server errors', async () => {
   await assert.rejects(
     readChatCompletionStream(streamFrom(['data: nope\n\n']), () => {}),

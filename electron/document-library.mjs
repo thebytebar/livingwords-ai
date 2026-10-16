@@ -22,7 +22,7 @@ const MAX_IMPORT_COUNT = 20;
 export const MAX_DOCUMENT_CONTEXT_CHARS = 12_000;
 const MAX_FILE_SIZE = 20 * 1024 * 1024;
 export const MAX_DOCUMENT_CACHE_BYTES = 250 * 1024 * 1024;
-const MAX_SEARCH_RESULTS = 5;
+const MAX_SEARCH_RESULTS = 8;
 const MAX_TOOL_RESULT_CHARS = 4_000;
 const MAX_IGNORED_SEARCH_FILES = 500;
 const MAX_IGNORED_SEARCH_BYTES = 50 * 1024 * 1024;
@@ -332,10 +332,17 @@ function rankIndexedChunks(index, query, maximumResults) {
 
 function projectOverviewPriority(file) {
   const normalized = file.name.replaceAll('\\', '/').toLocaleLowerCase();
-  if (/^readme(?:\.[^/]*)?$/u.test(normalized)) return 0;
-  if (/^(?:package\.json|pyproject\.toml|cargo\.toml|go\.mod|composer\.json|pom\.xml)$/u.test(normalized)) return 1;
-  if (/^(?:src\/)?(?:index|main)\.(?:cjs|js|mjs|ts|tsx|py|go|rs)$/u.test(normalized)) return 2;
+  const basename = normalized.split('/').at(-1);
+  if (!normalized.includes('/') && /^readme(?:\.[^.]*)?$/u.test(normalized)) return 0;
+  if (!normalized.includes('/')
+    && /^(?:package\.json|pyproject\.toml|cargo\.toml|go\.mod|composer\.json|pom\.xml|makefile)$/u.test(normalized)) {
+    return 1;
+  }
+  if (/^(?:(?:src|app|lib)\/)?(?:index|main|app)\.(?:cjs|js|mjs|ts|tsx|py|go|rs)$/u.test(normalized)) return 2;
   if (/^(?:docs\/)?(?:overview|architecture|introduction|about)\.(?:md|markdown|txt)$/u.test(normalized)) return 3;
+  if (/(?:^|\/)(?:test|tests|__tests__)\/|(?:\.test|\.spec|_test)\.[^.]+$/u.test(normalized)) return 4;
+  if (/^(?:src|app|lib)\//u.test(normalized) && basename
+    && /\.(?:c|cc|cpp|cs|go|java|js|jsx|mjs|php|py|rb|rs|ts|tsx|vue)$/u.test(basename)) return 5;
   return Number.MAX_SAFE_INTEGER;
 }
 
@@ -573,6 +580,16 @@ export function createDocumentLibrary(rootDirectory, {
   }
 
   async function measureCacheUsage(metadata) {
+    let cacheInfo;
+    try {
+      cacheInfo = await lstat(cacheDirectory);
+    } catch (error) {
+      if (error?.code === 'ENOENT') return { totalBytes: 0, sessions: new Map() };
+      throw new Error(`Could not inspect local document cache storage: ${error.message}`, { cause: error });
+    }
+    if (cacheInfo.isSymbolicLink() || !cacheInfo.isDirectory()) {
+      throw new Error('The local document cache is not a regular directory.');
+    }
     let entries;
     try {
       entries = await readdir(cacheDirectory, { withFileTypes: true });
@@ -583,7 +600,9 @@ export function createDocumentLibrary(rootDirectory, {
     const sessions = new Map();
     let totalBytes = 0;
     for (const entry of entries) {
-      if (!entry.isDirectory() || entry.name.startsWith('.deleting-')) continue;
+      if (entry.name.startsWith('.deleting-')) continue;
+      if (entry.isSymbolicLink()) throw new Error('The local document cache contains a symbolic link.');
+      if (!entry.isDirectory()) continue;
       const directory = join(cacheDirectory, entry.name);
       const info = await lstat(directory);
       if (info.isSymbolicLink()) throw new Error('The local document cache contains a symbolic link.');
@@ -1584,18 +1603,30 @@ export function createDocumentLibrary(rootDirectory, {
         };
         await writeIndex(updated);
         try {
-          for (const [proposalId, proposal] of editProposals) {
-            if (proposal.sessionId === sessionId && proposal.referenceIds.includes(id)) editProposals.delete(proposalId);
-          }
-          const refreshed = await syncSession(sessionId, { indexMissing: false, includeIgnored: true });
-          await removeSelection(refreshed.files.map((file) => file.id));
-          const retainedFileIds = new Set(refreshed.files.map((file) => file.id));
-          for (const file of existing.files) {
-            if (!retainedFileIds.has(file.id)) await rm(cachePath(sessionId, file.id), { force: true });
-          }
+          await removeSelection(updated.files
+            .filter((file) => file.sessionId === sessionId)
+            .map((file) => file.id));
         } catch (error) {
           await writeIndex(existing);
           throw error;
+        }
+        for (const [proposalId, proposal] of editProposals) {
+          if (proposal.sessionId === sessionId && proposal.referenceIds.includes(id)) editProposals.delete(proposalId);
+        }
+        try {
+          const refreshed = await syncSession(sessionId, { indexMissing: false, includeIgnored: true });
+          const retainedIds = new Set(updated.files
+            .filter((file) => file.sessionId === sessionId)
+            .map((file) => file.id));
+          if (refreshed.files.some((file) => !retainedIds.has(file.id))
+            || [...retainedIds].some((fileId) => !refreshed.files.some((file) => file.id === fileId))) {
+            await removeSelection(refreshed.files.map((file) => file.id));
+          }
+          return { cleanupWarning: null };
+        } catch (error) {
+          return {
+            cleanupWarning: `The reference was removed, but its local index could not be refreshed: ${error.message}`,
+          };
         }
       });
     },
@@ -1994,39 +2025,100 @@ export function createDocumentLibrary(rootDirectory, {
           || hash(oldBytes) !== proposal.expectedHash) {
           throw new Error('The file changed after this diff was prepared. Review a new diff before applying edits.');
         }
+        const replacementBytes = Buffer.from(proposal.newContent, 'utf8');
+        const extracted = await extractDocument(file.extension, replacementBytes);
+        const cacheUsage = await measureCacheUsage(metadata);
+        const cachedTextPath = cachePath(sessionId, file.id);
+        const indexPathForSession = searchIndexPath(sessionId);
+        const previousCache = await readFile(cachedTextPath).catch((error) => {
+          if (error?.code === 'ENOENT') return null;
+          throw error;
+        });
+        const previousSearchIndex = await readFile(indexPathForSession).catch((error) => {
+          if (error?.code === 'ENOENT') return null;
+          throw error;
+        });
+        const searchIndex = await readSearchIndex(sessionId) ?? createSearchIndex();
+        removeFileFromSearchIndex(searchIndex, file.id);
+        addFileToSearchIndex(searchIndex, file.id, extracted.chunks);
         const temporaryPath = join(dirname(file.path), `.${basename(file.path)}.${randomUUID()}.livingwords.tmp`);
+        let sourceReplaced = false;
         try {
           await writeFile(temporaryPath, proposal.newContent, {
             encoding: 'utf8',
             mode: info.mode & 0o777,
             flag: 'wx',
           });
+
+          const nextFile = {
+            ...file,
+            size: proposal.newSize,
+            sha256: proposal.newSha256,
+            chunkCount: proposal.newChunkCount,
+            indexed: true,
+          };
+          await writeCache(sessionId, nextFile, extracted, metadata, cacheUsage);
+          await writeSearchIndex(sessionId, searchIndex, metadata, cacheUsage);
+
+          const currentInfo = await lstat(file.path);
+          const currentBytes = await readFile(file.path);
+          if (currentInfo.isSymbolicLink() || !currentInfo.isFile()
+            || currentInfo.size !== proposal.expectedSize
+            || currentInfo.mtimeMs !== proposal.expectedMtimeMs
+            || hash(currentBytes) !== proposal.expectedHash) {
+            throw new Error('The file changed after this diff was prepared. Review a new diff before applying edits.');
+          }
           await rename(temporaryPath, file.path);
+          sourceReplaced = true;
+          nextFile.mtimeMs = (await stat(file.path)).mtimeMs;
+          await writeIndex({
+            ...metadata,
+            files: metadata.files.map((entry) => entry.id === file.id ? nextFile : entry),
+          });
         } catch (error) {
           await rm(temporaryPath, { force: true });
-          throw new Error(`Could not apply the approved edit to "${file.name}": ${error.message}`, { cause: error });
+          const rollbackErrors = [];
+          const restore = async (path, previous, mode = 0o600) => {
+            if (previous === null) {
+              await rm(path, { force: true });
+              return;
+            }
+            const restorePath = `${path}.${randomUUID()}.rollback`;
+            try {
+              await writeFile(restorePath, previous, { mode, flag: 'wx' });
+              await rename(restorePath, path);
+            } catch (restoreError) {
+              await rm(restorePath, { force: true });
+              throw restoreError;
+            }
+          };
+          if (sourceReplaced) {
+            try {
+              await restore(file.path, oldBytes, info.mode & 0o777);
+            } catch (restoreError) {
+              rollbackErrors.push(`Could not restore the original file: ${restoreError.message}`);
+            }
+          }
+          for (const [path, previous] of [
+            [cachedTextPath, previousCache],
+            [indexPathForSession, previousSearchIndex],
+          ]) {
+            try {
+              await restore(path, previous);
+            } catch (restoreError) {
+              rollbackErrors.push(`Could not restore a local document index: ${restoreError.message}`);
+            }
+          }
+          try {
+            await writeIndex(metadata);
+          } catch (restoreError) {
+            rollbackErrors.push(`Could not persist document cache state: ${restoreError.message}`);
+          }
+          const rollback = rollbackErrors.length > 0 ? ` ${rollbackErrors.join(' ')}` : '';
+          throw new Error(`Could not apply the approved edit to "${file.name}": ${error.message}.${rollback}`, {
+            cause: error,
+          });
         }
-        const updatedInfo = await stat(file.path);
-        const nextFile = {
-          ...file,
-          size: proposal.newSize,
-          mtimeMs: updatedInfo.mtimeMs,
-          sha256: proposal.newSha256,
-          chunkCount: proposal.newChunkCount,
-          indexed: true,
-        };
-        const extracted = await extractDocument(file.extension, Buffer.from(proposal.newContent, 'utf8'));
-        const cacheUsage = await measureCacheUsage(metadata);
-        await writeCache(sessionId, nextFile, extracted, metadata, cacheUsage);
-        const searchIndex = await readSearchIndex(sessionId) ?? createSearchIndex();
-        removeFileFromSearchIndex(searchIndex, file.id);
-        addFileToSearchIndex(searchIndex, file.id, extracted.chunks);
-        await writeSearchIndex(sessionId, searchIndex, metadata, cacheUsage);
-        await writeIndex({
-          ...metadata,
-          files: metadata.files.map((entry) => entry.id === file.id ? nextFile : entry),
-        });
-        await touchSessionCache(sessionId);
         return { name: file.name };
       });
     },

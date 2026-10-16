@@ -16,7 +16,7 @@ test('desktop inference defaults to CPU and validates explicit GPU offload', () 
   }
 });
 
-test('desktop inference disables thinking so the output budget is reserved for the answer', () => {
+test('desktop inference disables model reasoning', () => {
   const args = llamaServerArguments({
     modelPath: '/models/gemma.gguf',
     modelId: 'gemma',

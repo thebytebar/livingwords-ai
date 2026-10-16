@@ -7,11 +7,13 @@ Use it without an account, subscription, or per-prompt cloud fees. You provide t
 ## What you can do
 
 - Ask questions, explore ideas, draft and revise writing, summarize, and plan.
-- Reference code, configuration, and other text files or text-based PDFs per conversation, search folder contents locally, open citations in the document viewer, and approve proposed text-file edits from a diff.
-- Get help with software tasks and use the built-in terminal. The app shows assistant-proposed commands and requires your approval before they run.
-- Keep conversations and their context on your device; inference runs locally.
+- Create workflows with activation guidance, steps, and goals; use the built-in workflow builder to clarify and refine new workflows in chat, then edit or delete them on the Workflows page.
+- Attach code, configuration, and other text files, PDFs, or folders to a conversation. For folder-wide questions, the assistant uses visible tool calls to inspect a bounded project overview, README files, manifests, source, and tests, then search and read more files with citations that open in the document viewer.
+- Research current information through DuckDuckGo Lite at `lite.duckduckgo.com`. Search queries go to DuckDuckGo, and its results appear in a dedicated Web Search tab; each opened page gets its own Browser tab. No API key is required.
+- Use deterministic arithmetic and check the device's local date and time. For software tasks, the assistant can request a single-line terminal command; it runs only after you approve that exact command in a confirmation dialog. The built-in terminal is also available for direct use.
+- Keep conversations and their context on your device; inference runs locally. Web searches and page requests leave the device, and remote content is treated as untrusted.
 
-LivingWords is a general-purpose assistant with a Christian persona informed by historic Trinitarian Christianity and the Bible. That perspective informs answers about faith, theology, and ethics, but is not forced into unrelated factual, creative, or technical answers. Its answers can be wrong and should be checked when accuracy matters. Document references, extracted text, and retrieval stay on this device; originals remain in place. Assistant-proposed edits to attached text files require approval, and PDFs are read-only. Scanned PDFs and OCR are not supported, and assistant responses have a bounded length.
+LivingWords is a general-purpose assistant with a Christian persona informed by historic Trinitarian Christianity and the Bible. That perspective informs answers about faith, theology, and ethics, but is not forced into unrelated factual, creative, or technical answers. Its answers can be wrong and should be checked when accuracy matters. Document references, extracted text, and retrieval stay on this device; originals remain in place unless you approve a proposed text-file edit. Agent-requested terminal commands require your approval. PDFs are read-only. Scanned PDFs and OCR are not supported, and assistant responses have a bounded length.
 
 ## Quick start
 

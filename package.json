@@ -1,16 +1,17 @@
 {
   "name": "livingwords-ai",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Local desktop AI with trusted, private workflows for serious users.",
   "productName": "LivingWords AI",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
   "scripts": {
     "build": "node scripts/build.mjs",
+    "demo:agent-loop": "tsx scripts/agent-loop-demo.ts",
     "dev": "npm run build && electron-rebuild --force --only node-pty && node scripts/brand-electron-macos.mjs && node scripts/launch-electron.mjs electron/main.mjs",
     "pack": "npm run build && electron-rebuild --force --only node-pty && node scripts/check-sidecar.mjs && electron-builder --dir",
     "deploy": "npm run build && electron-rebuild --force --only node-pty && node scripts/check-sidecar.mjs && electron-builder --publish never",
-    "test": "tsx --test src/core/assistant.test.ts && node --test desktop/chat-scroll.test.mjs desktop/document-diff.test.mjs desktop/folder-context.test.mjs desktop/panel-layout.test.mjs desktop/terminal-context.test.mjs desktop/terminal-readiness.test.mjs desktop/terminal-theme.test.mjs electron/chat-completion-stream.test.mjs electron/context-settings-store.test.mjs electron/context-window.test.mjs electron/conversation-store.test.mjs electron/document-library.test.mjs electron/pdf-text.test.mjs electron/inactivity-timeout.test.mjs electron/model-manager.test.mjs electron/request-queue.test.mjs electron/terminal-manager.test.mjs electron/trusted-renderer.test.mjs scripts/download-desktop-model.test.mjs",
+    "test": "tsx --test src/core/assistant.test.ts src/core/agent-loop.test.ts && node --test desktop/agent-trace.test.mjs desktop/chat-scroll.test.mjs desktop/document-diff.test.mjs desktop/folder-context.test.mjs desktop/panel-layout.test.mjs desktop/pending-indicator.test.mjs desktop/terminal-context.test.mjs desktop/terminal-readiness.test.mjs desktop/terminal-theme.test.mjs electron/agent-model-adapter.test.mjs electron/browser-manager.test.mjs electron/builtin-agent-tools.test.mjs electron/chat-completion-stream.test.mjs electron/context-settings-store.test.mjs electron/context-window.test.mjs electron/conversation-store.test.mjs electron/document-agent.test.mjs electron/document-library.test.mjs electron/pdf-text.test.mjs electron/inactivity-timeout.test.mjs electron/model-manager.test.mjs electron/request-queue.test.mjs electron/right-panel-tools.test.mjs electron/terminal-agent-tool.test.mjs electron/terminal-manager.test.mjs electron/trusted-renderer.test.mjs electron/web-search.test.mjs electron/workflow-agent-tool.test.mjs electron/workflow-store.test.mjs electron/workflow-matcher.test.mjs scripts/download-desktop-model.test.mjs",
     "postinstall": "node node_modules/electron/install.js && node scripts/install-desktop-model.mjs",
     "prepare": "npm run build"
   },

@@ -1,4 +1,5 @@
 export { createAssistantService } from './core/assistant.js';
+export { createAgentHarness, serializeTrace } from './core/agent-loop.js';
 export type {
   AssistantToolCall,
   AssistantRequestOptions,
@@ -8,3 +9,30 @@ export type {
   TextGenerationResult,
   TextGenerator,
 } from './core/assistant.js';
+export type {
+  AgentConversationTurn,
+  AgentContext,
+  AgentHarness,
+  AgentHarnessOptions,
+  AgentModel,
+  AgentModelResponse,
+  AgentProgressEvent,
+  AgentStopReason,
+  AgentStepStatus,
+  AgentToolEvent,
+  AgentToolEventStatus,
+  AgentTool,
+  AgentToolCall,
+  AgentToolSpec,
+  GuardrailDecision,
+  JsonValue,
+  RunMetrics,
+  RunResult,
+  Step,
+  TokenUsage,
+  ToolObservation,
+  ToolPermissionDecision,
+  ToolPermissionTier,
+  Trace,
+  VerificationResult,
+} from './core/agent-loop.js';

@@ -15,7 +15,7 @@
     <div class="splash-brand">
       <img class="splash-logo-dark" src="./assets/lw-logo-mark-dark.png" alt="">
       <img class="splash-logo-light" src="./assets/lw-logo-mark-light.png" alt="">
-      <span>LivingWords AI</span>
+      <span>LivingWords</span>
     </div>
   </div>
   <div id="app-shell" class="app-shell info-collapsed" inert aria-hidden="true">
@@ -27,13 +27,19 @@
       <button id="chat-nav" class="rail-button active" type="button" aria-label="Chat" title="Chat" aria-current="page" aria-controls="session-list" aria-expanded="false">
         <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 11.5a7.5 7.5 0 0 1-7.5 7.5H5l1.8-3.2A7.5 7.5 0 1 1 20 11.5Z"/></svg>
       </button>
+      <button id="workflows-nav" class="rail-button" type="button" aria-label="Workflows" title="Workflows" aria-controls="workflow-list" aria-expanded="false">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 5h5v5H5zM14 5h5v5h-5zM5 14h5v5H5zM14 14h5v5h-5z"/><path d="M10 7.5h4M7.5 10v4M16.5 10v4M10 16.5h4"/></svg>
+      </button>
+      <button id="tools-nav" class="rail-button" type="button" aria-label="Tools" title="Tools" aria-controls="tools-main">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94L14.7 6.3z"/></svg>
+      </button>
       <div class="rail-spacer"></div>
       <button id="settings-button" class="rail-button" type="button" aria-label="Settings" title="Settings">
         <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 8.5a3.5 3.5 0 1 0 0 7 3.5 3.5 0 0 0 0-7Z"/><path d="m19.4 15 .1.1 1.1.9-1.2 2.1-1.4-.5a7.9 7.9 0 0 1-1.6.9l-.3 1.5h-2.4l-.3-1.5a7.9 7.9 0 0 1-1.7-.9l-1.3.5-1.2-2.1 1.1-.9a7.2 7.2 0 0 1 0-1.9l-1.1-.9 1.2-2.1 1.3.5a7.9 7.9 0 0 1 1.7-.9l.3-1.5h2.4l.3 1.5a7.9 7.9 0 0 1 1.6.9l1.4-.5 1.2 2.1-1.1.9a7.2 7.2 0 0 1-.1 1.8Z" transform="translate(-2 -1)"/></svg>
       </button>
     </nav>
 
-    <aside class="sessions-panel" aria-label="Chat sessions">
+    <aside id="sessions-panel" class="sessions-panel" aria-label="Chat sessions">
       <div id="sessions-resizer" class="panel-resizer sessions-resizer" role="separator" tabindex="0"
         aria-orientation="vertical" aria-label="Resize sessions panel" aria-valuemin="200" aria-valuemax="420" aria-valuenow="264"></div>
       <header class="sessions-heading">
@@ -58,14 +64,26 @@
       </div>
     </aside>
 
-    <main class="main-panel">
+    <aside id="workflow-sidebar" class="sessions-panel workflow-sidebar" aria-label="Workflows" hidden>
+      <header class="sessions-heading">
+        <h2>Workflows</h2>
+        <button id="workflow-new" class="new-chat" type="button" aria-label="Create workflow" title="Create workflow">
+          <svg class="new-chat-plus" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg>
+          <span class="new-chat-label">New</span>
+        </button>
+      </header>
+      <p class="workflow-sidebar-description">Task guides the assistant can follow automatically. Drag to set priority.</p>
+      <div id="workflow-list" class="workflow-list" role="group" aria-label="Available workflows"></div>
+    </aside>
+
+    <main id="main-panel" class="main-panel">
       <header class="topbar">
         <div class="conversation-heading">
           <span class="eyebrow">PERSONAL KNOWLEDGE SPACE</span>
           <h1 id="conversation-title">A thoughtful place to begin</h1>
         </div>
         <div class="chat-actions">
-          <button id="info-toggle" class="info-toggle" type="button" aria-label="Toggle tools and documents panel" aria-controls="info-panel" aria-expanded="false" title="Show tools and documents">
+          <button id="info-toggle" class="info-toggle" type="button" aria-label="Toggle Activity, tools, and files panel" aria-controls="info-panel" aria-expanded="false" title="Show Activity, tools, and files">
             <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3.5" y="4" width="17" height="16" rx="2"/><path d="M14.5 4v16M9 9l3 3-3 3"/></svg>
           </button>
         </div>
@@ -73,7 +91,7 @@
       <section id="welcome" class="welcome">
         <img class="welcome-logo-dark" src="./assets/lw-logo-mark-dark.png" alt="">
         <img class="welcome-logo-light" src="./assets/lw-logo-mark-light.png" alt="">
-        <h2>LivingWords AI</h2>
+        <h2>LivingWords</h2>
       </section>
       <section id="messages" class="messages" aria-live="polite"></section>
       <div id="activity" class="activity" role="status" aria-live="polite" hidden>
@@ -93,6 +111,8 @@
               <div id="composer-document-menu" class="document-add-menu composer-add-menu" role="menu" hidden>
                 <button type="button" role="menuitem" data-composer-document-add="files">Add files</button>
                 <button type="button" role="menuitem" data-composer-document-add="folder">Add folder</button>
+                <button type="button" role="menuitem" data-composer-document-add="website">Add website</button>
+                <button type="button" role="menuitem" data-composer-document-add="web-search">Add web search</button>
               </div>
             </div>
             <div id="selected-document-sources" class="selected-document-sources" role="status" aria-label="Attached document count" hidden>
@@ -124,9 +144,58 @@
       </form>
     </main>
 
-    <aside id="info-panel" class="info-panel" aria-label="Tools and documents panel" hidden>
+    <main id="workflow-main" class="main-panel workflow-main" hidden>
+      <header class="topbar workflow-topbar">
+        <div class="conversation-heading">
+          <span class="eyebrow">TASK GUIDES</span>
+          <h1>Workflows</h1>
+        </div>
+      </header>
+      <section id="workflow-empty" class="workflow-empty">
+        <h2>Select a workflow</h2>
+        <p>Choose a workflow to review or edit when it should activate, the steps it should follow, and its goal. Workflows activate automatically only when a request is a clear match.</p>
+      </section>
+      <section id="workflow-editor" class="workflow-editor workflow-detail" aria-labelledby="workflow-detail-title" hidden>
+        <div class="workflow-detail-heading">
+          <div>
+            <p id="workflow-origin" class="eyebrow"></p>
+            <h2 id="workflow-detail-title">Workflow details</h2>
+          </div>
+          <p id="workflow-detail-description" class="workflow-detail-description">Edit the intent and instructions the assistant uses for this kind of task.</p>
+        </div>
+        <label class="context-window-label" for="workflow-name">Name</label>
+        <input id="workflow-name" type="text" maxlength="80" autocomplete="off">
+        <label class="context-window-label" for="workflow-starter">When should this workflow activate?</label>
+        <textarea id="workflow-starter" rows="3" maxlength="1500"></textarea>
+        <label class="context-window-label" for="workflow-steps">What steps should this workflow follow?</label>
+        <textarea id="workflow-steps" rows="8"></textarea>
+        <label class="context-window-label" for="workflow-goal">What is the goal of this workflow?</label>
+        <textarea id="workflow-goal" rows="3" maxlength="2000"></textarea>
+        <div class="workflow-actions">
+          <button id="workflow-delete" class="quiet-button" type="button" hidden>Delete</button>
+          <span class="workflow-action-spacer"></span>
+          <button id="workflow-save" class="primary-button" type="button">Save workflow</button>
+        </div>
+      </section>
+      <p id="workflow-error" class="settings-error workflow-main-error" role="status" hidden></p>
+    </main>
+
+    <main id="tools-main" class="main-panel tools-main" aria-labelledby="tools-page-title" hidden>
+      <header class="topbar tools-topbar">
+        <div class="conversation-heading">
+          <span class="eyebrow">WHAT LIVINGWORDS CAN DO</span>
+          <h1 id="tools-page-title">Tools</h1>
+        </div>
+      </header>
+      <div class="tools-page-intro">
+        <p>These tools help LivingWords work with information and your computer. Select one to learn what it does and when it is used.</p>
+      </div>
+      <section id="tools-grid" class="tools-grid" aria-label="Available tools"></section>
+    </main>
+
+    <aside id="info-panel" class="info-panel" aria-label="Activity, tools, and files panel" hidden>
       <div id="info-resizer" class="panel-resizer info-resizer" role="separator" tabindex="0"
-        aria-orientation="vertical" aria-label="Resize info panel" aria-valuemin="220" aria-valuemax="580" aria-valuenow="300"></div>
+        aria-orientation="vertical" aria-label="Resize Activity panel" aria-valuemin="220" aria-valuemax="580" aria-valuenow="300"></div>
       <div class="info-toolbar">
         <div class="info-add-wrap">
           <button id="info-add-tab" class="info-add-tab" type="button" aria-label="Add tab" title="Add tab"
@@ -134,16 +203,26 @@
             <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg>
           </button>
           <div id="info-add-menu" class="info-add-menu" role="menu" hidden>
-            <button type="button" role="menuitem" data-add-info-tab="documents">Documents</button>
+            <button type="button" role="menuitem" data-add-info-tab="browser">Browser</button>
+            <button type="button" role="menuitem" data-add-info-tab="documents">Files</button>
+            <button type="button" role="menuitem" data-add-info-tab="web-search">Web Search</button>
             <button type="button" role="menuitem" data-add-info-tab="terminal">Terminal</button>
           </div>
         </div>
-        <div id="info-tab-list" class="info-tab-list" role="tablist" aria-label="Tools"></div>
-        <button id="info-close" class="icon-button info-close" type="button" aria-label="Close tools panel" title="Close panel">×</button>
+        <div id="info-tab-list" class="info-tab-list" role="tablist" aria-label="Activity, tools, and files"></div>
+        <button id="info-close" class="icon-button info-close" type="button" aria-label="Close Activity panel" title="Close panel">×</button>
       </div>
       <div id="info-tab-panels" class="info-tab-panels"></div>
     </aside>
   </div>
+
+  <dialog id="tool-details-dialog" class="tool-details-dialog" aria-labelledby="tool-details-title" aria-describedby="tool-details-description">
+    <div class="dialog-heading">
+      <div><p class="eyebrow">TOOL DETAILS</p><h2 id="tool-details-title">Tool details</h2></div>
+      <button id="tool-details-close" class="icon-button" type="button" aria-label="Close tool details">×</button>
+    </div>
+    <p id="tool-details-description" class="tool-details-description"></p>
+  </dialog>
 
   <dialog id="document-viewer-dialog" class="document-viewer-dialog" aria-labelledby="document-viewer-title">
     <div class="dialog-heading">
