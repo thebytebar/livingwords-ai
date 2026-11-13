@@ -27,7 +27,7 @@
       <button id="chat-nav" class="rail-button active" type="button" aria-label="Chat" title="Chat" aria-current="page" aria-controls="session-list" aria-expanded="false">
         <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 11.5a7.5 7.5 0 0 1-7.5 7.5H5l1.8-3.2A7.5 7.5 0 1 1 20 11.5Z"/></svg>
       </button>
-      <button id="workflows-nav" class="rail-button" type="button" aria-label="Workflows" title="Workflows" aria-controls="workflow-list" aria-expanded="false">
+      <button id="skills-nav" class="rail-button" type="button" aria-label="Skills" title="Skills" aria-controls="skill-grid" aria-expanded="false">
         <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 5h5v5H5zM14 5h5v5h-5zM5 14h5v5H5zM14 14h5v5h-5z"/><path d="M10 7.5h4M7.5 10v4M16.5 10v4M10 16.5h4"/></svg>
       </button>
       <button id="tools-nav" class="rail-button" type="button" aria-label="Tools" title="Tools" aria-controls="tools-main">
@@ -64,18 +64,6 @@
       </div>
     </aside>
 
-    <aside id="workflow-sidebar" class="sessions-panel workflow-sidebar" aria-label="Workflows" hidden>
-      <header class="sessions-heading">
-        <h2>Workflows</h2>
-        <button id="workflow-new" class="new-chat" type="button" aria-label="Create workflow" title="Create workflow">
-          <svg class="new-chat-plus" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg>
-          <span class="new-chat-label">New</span>
-        </button>
-      </header>
-      <p class="workflow-sidebar-description">Task guides the assistant can follow automatically. Drag to set priority.</p>
-      <div id="workflow-list" class="workflow-list" role="group" aria-label="Available workflows"></div>
-    </aside>
-
     <main id="main-panel" class="main-panel">
       <header class="topbar">
         <div class="conversation-heading">
@@ -83,7 +71,7 @@
           <h1 id="conversation-title">A thoughtful place to begin</h1>
         </div>
         <div class="chat-actions">
-          <button id="info-toggle" class="info-toggle" type="button" aria-label="Toggle Activity, tools, and files panel" aria-controls="info-panel" aria-expanded="false" title="Show Activity, tools, and files">
+          <button id="info-toggle" class="info-toggle" type="button" aria-label="Toggle tools and files panel" aria-controls="info-panel" aria-expanded="false" title="Show tools and files">
             <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3.5" y="4" width="17" height="16" rx="2"/><path d="M14.5 4v16M9 9l3 3-3 3"/></svg>
           </button>
         </div>
@@ -99,7 +87,12 @@
         <button id="activity-clear" class="activity-clear" type="button" hidden>Clear</button>
       </div>
       <form id="composer" class="composer">
-        <textarea id="question" rows="1" placeholder="Ask a question or explore an idea…" aria-label="Your question"></textarea>
+        <div class="composer-prompt-wrap">
+          <div id="question" class="composer-prompt" contenteditable="true" role="textbox" aria-multiline="true"
+            data-placeholder="Ask a question, type @ for a tool, or / for a skill…" aria-label="Your question"
+            aria-autocomplete="list" aria-controls="tool-suggestions" aria-expanded="false"></div>
+          <div id="tool-suggestions" class="tool-suggestions" role="listbox" aria-label="Tools and skills" hidden></div>
+        </div>
         <div class="composer-bottom">
           <div class="composer-tools">
             <div class="document-add-wrap composer-document-add">
@@ -123,19 +116,19 @@
             <button id="cancel" type="button" hidden>Cancel</button>
             <div class="context-meter" id="context-meter">
               <div id="context-meter-track" class="context-meter-ring" role="progressbar" tabindex="0"
-                aria-label="Estimated context window usage" aria-valuemin="0" aria-valuemax="32000" aria-valuenow="0"
+                aria-label="Estimated prompt context usage" aria-valuemin="0" aria-valuemax="32000" aria-valuenow="0"
                 aria-valuetext="Approximately 0 of 32,000 context tokens" aria-describedby="context-meter-tooltip">
                 <span class="context-meter-value" aria-hidden="true">0</span>
               </div>
               <div class="context-meter-tooltip" id="context-meter-tooltip" role="tooltip">
                 <div class="limit-meter-heading">
-                  <span>Context estimate</span>
+                  <span>Prompt estimate</span>
                   <span id="context-meter-value">~0 / 32,000 tokens</span>
                 </div>
                 <div class="limit-meter-track" aria-hidden="true">
                   <span class="limit-meter-fill"></span>
                 </div>
-                <p>Input estimate; actual token use may vary.</p>
+                <p>Draft estimate from the message and recent history; system and tool context may add tokens. Response output has a separate limit.</p>
               </div>
             </div>
             <button id="send" type="submit" aria-label="Send message">↑</button>
@@ -144,40 +137,24 @@
       </form>
     </main>
 
-    <main id="workflow-main" class="main-panel workflow-main" hidden>
-      <header class="topbar workflow-topbar">
+    <main id="skill-main" class="main-panel skill-main" aria-labelledby="skill-page-title" hidden>
+      <header class="topbar skill-topbar">
         <div class="conversation-heading">
           <span class="eyebrow">TASK GUIDES</span>
-          <h1>Workflows</h1>
+          <h1 id="skill-page-title">Skills</h1>
         </div>
+        <button id="skill-new" class="primary-button skill-new" type="button">New skill</button>
       </header>
-      <section id="workflow-empty" class="workflow-empty">
-        <h2>Select a workflow</h2>
-        <p>Choose a workflow to review or edit when it should activate, the steps it should follow, and its goal. Workflows activate automatically only when a request is a clear match.</p>
-      </section>
-      <section id="workflow-editor" class="workflow-editor workflow-detail" aria-labelledby="workflow-detail-title" hidden>
-        <div class="workflow-detail-heading">
-          <div>
-            <p id="workflow-origin" class="eyebrow"></p>
-            <h2 id="workflow-detail-title">Workflow details</h2>
-          </div>
-          <p id="workflow-detail-description" class="workflow-detail-description">Edit the intent and instructions the assistant uses for this kind of task.</p>
-        </div>
-        <label class="context-window-label" for="workflow-name">Name</label>
-        <input id="workflow-name" type="text" maxlength="80" autocomplete="off">
-        <label class="context-window-label" for="workflow-starter">When should this workflow activate?</label>
-        <textarea id="workflow-starter" rows="3" maxlength="1500"></textarea>
-        <label class="context-window-label" for="workflow-steps">What steps should this workflow follow?</label>
-        <textarea id="workflow-steps" rows="8"></textarea>
-        <label class="context-window-label" for="workflow-goal">What is the goal of this workflow?</label>
-        <textarea id="workflow-goal" rows="3" maxlength="2000"></textarea>
-        <div class="workflow-actions">
-          <button id="workflow-delete" class="quiet-button" type="button" hidden>Delete</button>
-          <span class="workflow-action-spacer"></span>
-          <button id="workflow-save" class="primary-button" type="button">Save workflow</button>
-        </div>
-      </section>
-      <p id="workflow-error" class="settings-error workflow-main-error" role="status" hidden></p>
+      <div class="tools-page-intro skill-page-intro">
+        <p>Build reusable task guides with one prompt describing when to use them and how the assistant should handle the task. Type @ in the prompt to reference a tool by name.</p>
+      </div>
+      <div class="tools-search skill-search">
+        <label for="skill-search-input">Search skills</label>
+        <input id="skill-search-input" type="search" placeholder="Filter by name, description, or prompt" autocomplete="off">
+      </div>
+      <section id="skill-grid" class="skill-groups" aria-label="Available skills"></section>
+      <p id="skill-no-results" class="tools-no-results" role="status" hidden>No skills match your search.</p>
+      <p id="skill-error" class="settings-error skill-main-error" role="status" hidden></p>
     </main>
 
     <main id="tools-main" class="main-panel tools-main" aria-labelledby="tools-page-title" hidden>
@@ -188,14 +165,19 @@
         </div>
       </header>
       <div class="tools-page-intro">
-        <p>These tools help LivingWords work with information and your computer. Select one to learn what it does and when it is used.</p>
+        <p>Browse the function tools the assistant can call to work with documents, the web, skills, and your computer. Names match the functions exposed to the model; some are available only in specific contexts.</p>
       </div>
-      <section id="tools-grid" class="tools-grid" aria-label="Available tools"></section>
+      <div class="tools-search">
+        <label for="tools-search-input">Search tools</label>
+        <input id="tools-search-input" type="search" placeholder="Filter by name or behavior" autocomplete="off">
+      </div>
+      <section id="tools-grid" class="tools-groups" aria-label="Available tools"></section>
+      <p id="tools-no-results" class="tools-no-results" role="status" hidden>No tools match your search.</p>
     </main>
 
-    <aside id="info-panel" class="info-panel" aria-label="Activity, tools, and files panel" hidden>
+    <aside id="info-panel" class="info-panel" aria-label="Tools and files panel" hidden>
       <div id="info-resizer" class="panel-resizer info-resizer" role="separator" tabindex="0"
-        aria-orientation="vertical" aria-label="Resize Activity panel" aria-valuemin="220" aria-valuemax="580" aria-valuenow="300"></div>
+        aria-orientation="vertical" aria-label="Resize tools and files panel" aria-valuemin="220" aria-valuemax="580" aria-valuenow="300"></div>
       <div class="info-toolbar">
         <div class="info-add-wrap">
           <button id="info-add-tab" class="info-add-tab" type="button" aria-label="Add tab" title="Add tab"
@@ -209,19 +191,57 @@
             <button type="button" role="menuitem" data-add-info-tab="terminal">Terminal</button>
           </div>
         </div>
-        <div id="info-tab-list" class="info-tab-list" role="tablist" aria-label="Activity, tools, and files"></div>
-        <button id="info-close" class="icon-button info-close" type="button" aria-label="Close Activity panel" title="Close panel">×</button>
+        <div id="info-tab-list" class="info-tab-list" role="tablist" aria-label="Tools and files"></div>
+        <button id="info-close" class="icon-button info-close" type="button" aria-label="Close tools and files panel" title="Close panel">×</button>
       </div>
       <div id="info-tab-panels" class="info-tab-panels"></div>
     </aside>
   </div>
 
-  <dialog id="tool-details-dialog" class="tool-details-dialog" aria-labelledby="tool-details-title" aria-describedby="tool-details-description">
+  <dialog id="tool-details-dialog" class="tool-details-dialog" aria-labelledby="tool-details-title" aria-describedby="tool-details-availability tool-details-description">
     <div class="dialog-heading">
       <div><p class="eyebrow">TOOL DETAILS</p><h2 id="tool-details-title">Tool details</h2></div>
       <button id="tool-details-close" class="icon-button" type="button" aria-label="Close tool details">×</button>
     </div>
+    <p id="tool-details-availability" class="tool-details-availability"></p>
     <p id="tool-details-description" class="tool-details-description"></p>
+  </dialog>
+
+  <dialog id="skill-editor-dialog" class="skill-editor-dialog" aria-labelledby="skill-detail-title">
+    <form id="skill-editor" class="skill-editor">
+      <div class="dialog-heading skill-editor-heading">
+        <div>
+          <p id="skill-origin" class="eyebrow"></p>
+          <h2 id="skill-detail-title">New skill</h2>
+        </div>
+        <button id="skill-editor-close" class="icon-button" type="button" aria-label="Close skill editor">×</button>
+      </div>
+      <p id="skill-detail-description" class="skill-detail-description">Summarize what the skill does, then describe when it should activate and how the assistant should carry it out.</p>
+      <label class="context-window-label" for="skill-name">Name</label>
+      <input id="skill-name" type="text" maxlength="80" autocomplete="off">
+      <label class="context-window-label" for="skill-description">Description</label>
+      <textarea id="skill-description" rows="2" maxlength="240" placeholder="Briefly describe what this skill does."></textarea>
+      <label class="context-window-label" for="skill-prompt">Skill prompt</label>
+      <textarea id="skill-prompt" rows="12" maxlength="12000" placeholder="Describe when to use this skill, what the assistant should do, and what a good result looks like."></textarea>
+      <p id="skill-editor-error" class="settings-error skill-editor-error" role="status" hidden></p>
+      <div id="skill-tool-suggestions" class="skill-tool-suggestions" role="listbox" aria-label="Available tools" hidden></div>
+      <div class="skill-actions">
+        <button id="skill-delete" class="quiet-button" type="button" hidden>Delete</button>
+        <span class="skill-action-spacer"></span>
+        <button id="skill-cancel" class="quiet-button" type="button">Cancel</button>
+        <button id="skill-save" class="primary-button" type="submit">Save skill</button>
+      </div>
+    </form>
+  </dialog>
+
+  <dialog id="skill-confirm-dialog" class="confirm-dialog" aria-labelledby="skill-confirm-title" aria-describedby="skill-confirm-copy">
+    <p class="eyebrow">SKILL ACTION</p>
+    <h2 id="skill-confirm-title"></h2>
+    <p id="skill-confirm-copy"></p>
+    <form method="dialog" class="dialog-actions">
+      <button id="skill-confirm-cancel" class="quiet-button" value="cancel" autofocus>Keep editing</button>
+      <button id="skill-confirm-accept" class="danger-button" value="confirm">Confirm</button>
+    </form>
   </dialog>
 
   <dialog id="document-viewer-dialog" class="document-viewer-dialog" aria-labelledby="document-viewer-title">
@@ -255,16 +275,16 @@
     </section>
     <section class="settings-section" aria-labelledby="context-window-heading">
       <h3 id="context-window-heading">Context window</h3>
-      <p id="context-window-description">Larger windows let the model consider more text and use more memory. Changing this setting restarts the local model and cancels any response in progress. Output limits scale with the window up to 10,000 tokens.</p>
+      <p id="context-window-description">Larger windows let the model consider more text and use more memory. Changing this setting restarts the local model and cancels any response in progress. The default is 16K; use a larger window only for long threads or large attached folders. Final answers are capped at up to 3,000 tokens; tool turns remain capped at 1,500.</p>
       <label class="context-window-label" for="context-window-select">Window size</label>
       <select id="context-window-select" aria-describedby="context-window-description" disabled>
         <option value="8192">8K</option>
-        <option value="16384">16K</option>
-        <option value="32768" selected>32K (Recommended)</option>
+        <option value="16384" selected>16K (Recommended)</option>
+        <option value="32768">32K</option>
         <option value="65536">64K</option>
         <option value="131072">128K</option>
       </select>
-      <p id="context-window-response-limit" class="context-window-response-limit">Response limit: 8,000 tokens</p>
+      <p id="context-window-response-limit" class="context-window-response-limit">Response limit: 3,000 tokens</p>
     </section>
     <p class="privacy-note">Your conversations stay on this device. No account, subscription, or per-prompt cloud fees.</p>
   </dialog>
@@ -275,7 +295,7 @@
       <button id="about-close" class="icon-button" type="button" aria-label="Close about LivingWords AI">×</button>
     </div>
     <div class="about-content">
-      <p>LivingWords AI is private desktop AI for serious users who need trusted workflows for writing, thinking, planning, and software tasks. Use it without an account, subscription, or per-prompt cloud fees.</p>
+      <p>LivingWords AI is private desktop AI for serious users who need trusted skills for writing, thinking, planning, and software tasks. Use it without an account, subscription, or per-prompt cloud fees.</p>
       <section class="settings-section" aria-labelledby="about-privacy-heading">
         <h3 id="about-privacy-heading">Private by design</h3>
         <p>Responses are generated on this device and conversations are stored locally. Your prompts are not sent to a cloud AI service. You provide the hardware, storage, and power to run the model.</p>
@@ -516,16 +536,6 @@ permissions and limitations under the License.</pre>
       </details>
       <p class="model-license-source">Official terms: <a href="https://ai.google.dev/gemma/apache_2" target="_blank" rel="noopener noreferrer">Google's Gemma license page</a> · <a href="https://www.apache.org/licenses/LICENSE-2.0" target="_blank" rel="noopener noreferrer">Apache License 2.0</a>. Review the model card and source repository for model-specific notices before redistribution.</p>
     </div>
-  </dialog>
-
-  <dialog id="delete-dialog" class="confirm-dialog" aria-labelledby="delete-dialog-title">
-    <p class="eyebrow">DELETE CONVERSATION</p>
-    <h2 id="delete-dialog-title">Permanently delete this conversation?</h2>
-    <p id="delete-dialog-copy">This conversation and its messages will be permanently deleted.</p>
-    <form method="dialog" class="dialog-actions">
-      <button class="quiet-button" value="cancel">Cancel</button>
-      <button id="delete-confirm" class="danger-button" value="delete">Delete conversation</button>
-    </form>
   </dialog>
 
   <dialog id="terminal-command-dialog" class="confirm-dialog" aria-labelledby="terminal-command-title">

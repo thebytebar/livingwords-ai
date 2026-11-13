@@ -8,14 +8,14 @@ import {
   WEB_SEARCH_PROVIDERS,
 } from './web-search.mjs';
 
-test('DuckDuckGo Lite is the only configured provider', () => {
+test('DuckDuckGo is the only configured provider', () => {
   assert.equal(DEFAULT_WEB_SEARCH_PROVIDER, 'duckduckgo');
-  assert.deepEqual(WEB_SEARCH_PROVIDERS, [{ id: 'duckduckgo', name: 'DuckDuckGo Lite' }]);
+  assert.deepEqual(WEB_SEARCH_PROVIDERS, [{ id: 'duckduckgo', name: 'DuckDuckGo' }]);
   assert.equal(validateWebSearchProvider('duckduckgo'), 'duckduckgo');
   assert.throws(() => validateWebSearchProvider('exa'), /supported web search provider/u);
 });
 
-test('search delegates to DuckDuckGo Lite and normalizes bounded public results', async () => {
+test('search delegates to DuckDuckGo and normalizes bounded public results', async () => {
   let request;
   const result = await searchWeb({
     query: '  latest science news ',
@@ -56,7 +56,7 @@ test('search rejects malformed queries, invalid search responses, and missing in
   );
   await assert.rejects(
     searchWeb({ query: 'query', provider: 'duckduckgo' }),
-    /requires a DuckDuckGo Lite browser integration/u,
+    /requires a DuckDuckGo search integration/u,
   );
 });
 

@@ -6,8 +6,9 @@ export const CONTEXT_WINDOW_PRESETS = Object.freeze([
   Object.freeze({ label: '128K', tokens: 131_072, meterTokens: 128_000 }),
 ]);
 
-export const DEFAULT_CONTEXT_WINDOW_TOKENS = 32_768;
-export const MAX_RESPONSE_TOKENS = 10_000;
+export const DEFAULT_CONTEXT_WINDOW_TOKENS = 16_384;
+export const MAX_RESPONSE_TOKENS = 3_000;
+export const MAX_TOOL_TURN_OUTPUT_TOKENS = 1_500;
 
 export function isContextWindowTokens(value) {
   return CONTEXT_WINDOW_PRESETS.some((preset) => preset.tokens === value);

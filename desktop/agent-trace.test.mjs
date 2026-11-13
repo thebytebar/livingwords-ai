@@ -4,8 +4,9 @@ import {
   canCloseInfoTab,
   formatDuration,
   formatTraceTime,
+  finalAnswerOutputUsage,
   isAgentTrace,
-  latestAgentTrace,
+  latestPromptUsage,
   mergeAgentTraces,
   traceActivityDescription,
   traceLiveDecisionActivity,
@@ -17,38 +18,150 @@ import {
   traceToolActivity,
   traceToolDescription,
   traceDurationMs,
+  traceOutputUsageBreakdown,
+  traceActivitiesForMessage,
   traceToolTitle,
   updateTraceTab,
-  workflowSelectionActivity,
+  skillSelectionActivity,
 } from './agent-trace.mjs';
 
 const first = { schema_version: 1, run_id: 'first', steps: [] };
 const latest = { schema_version: 1, run_id: 'latest', steps: [] };
 
-test('latest persisted assistant trace is selected and malformed traces are ignored', () => {
+test('trace shape validation rejects malformed traces', () => {
   assert.equal(isAgentTrace(first), true);
   assert.equal(isAgentTrace({ ...latest, steps: {} }), false);
-  assert.equal(latestAgentTrace([
-    { role: 'assistant', trace: first },
-    { role: 'user', trace: latest },
-    { role: 'assistant', trace: { schema_version: 2 } },
-    { role: 'assistant', trace: latest },
-  ]), latest);
-  assert.equal(latestAgentTrace([{ role: 'user', trace: latest }]), null);
 });
 
-test('Activity is permanent and Files can close only when no files are attached', () => {
-  assert.equal(canCloseInfoTab({ kind: 'trace' }), false);
+test('prompt usage prefers runtime token counts and otherwise uses the latest context estimate', () => {
+  const trace = {
+    ...latest,
+    steps: [
+      { token_usage: { input_tokens: 120 }, estimated_prompt_tokens: 110 },
+      { estimated_prompt_tokens: 240 },
+    ],
+  };
+  assert.deepEqual(latestPromptUsage(trace), { tokens: 240, source: 'estimate' });
+  trace.steps[1].token_usage = { input_tokens: 256 };
+  assert.deepEqual(latestPromptUsage(trace), { tokens: 256, source: 'runtime' });
+  trace.steps[1] = { estimated_prompt_tokens: 0 };
+  assert.deepEqual(latestPromptUsage(trace), { tokens: 120, source: 'runtime' });
+  assert.equal(latestPromptUsage({ ...latest, steps: [] }), null);
+});
+
+test('final response usage reads the actual output count and per-turn limit', () => {
+  assert.deepEqual(finalAnswerOutputUsage({
+    ...latest,
+    steps: [{
+      final_answer: 'Finished.',
+      token_usage: { output_tokens: 1_500 },
+      output_token_limit: 1_500,
+    }],
+  }), { outputTokens: 1_500, outputTokenLimit: 1_500 });
+  assert.equal(finalAnswerOutputUsage({
+    ...latest,
+    steps: [{ final_answer: null, token_usage: { output_tokens: 320 } }],
+  }), null);
+});
+
+test('output usage separates intermediate turns from the final answer', () => {
+  assert.deepEqual(traceOutputUsageBreakdown({
+    ...latest,
+    steps: [
+      { token_usage: { output_tokens: 200 }, output_token_limit: 320 },
+      { token_usage: { output_tokens: 180 }, output_token_limit: 320 },
+      {
+        final_answer: 'Finished.',
+        token_usage: { output_tokens: 500 },
+        output_token_limit: 1_200,
+      },
+    ],
+  }), {
+    finalAnswerTokens: 500,
+    intermediateTokens: 380,
+    totalTokens: 880,
+    finalAnswerTurns: 1,
+    intermediateTurns: 2,
+    measuredFinalAnswerTurns: 1,
+    measuredIntermediateTurns: 2,
+    finalAnswerTurnLimit: 1_200,
+  });
+});
+
+test('Files can close only when no files are attached', () => {
   assert.equal(canCloseInfoTab({ kind: 'documents' }), true);
   assert.equal(canCloseInfoTab({ kind: 'documents' }, true), false);
   assert.equal(canCloseInfoTab({ kind: 'terminal' }), true);
 });
 
-test('a selected workflow is rendered as a completed Activity entry', () => {
-  assert.deepEqual(workflowSelectionActivity('Build a workflow'), {
-    title: 'Workflow selected: Build a workflow',
+test('activity history keeps each assistant run attached to its own message', () => {
+  const firstTrace = {
+    ...first,
+    steps: [{
+      step_number: 1,
+      timestamp: '2026-10-15T12:00:00.000Z',
+      status: 'success',
+      thought: null,
+      tool_calls: [{ name: 'calculate', arguments: { expression: '1 + 1' } }],
+      observation: [{ name: 'calculate', status: 'success', result: { result: 2 } }],
+      error: null,
+    }],
+  };
+  const secondTrace = {
+    ...latest,
+    steps: [{
+      step_number: 1,
+      timestamp: '2026-10-15T12:01:00.000Z',
+      status: 'complete',
+      thought: null,
+      tool_calls: null,
+      observation: null,
+      error: null,
+    }],
+  };
+  const messages = [
+    { role: 'assistant', content: 'First answer.', trace: firstTrace },
+    { role: 'user', content: 'Follow-up.' },
+    {
+      role: 'assistant',
+      content: 'Second answer.',
+      trace: secondTrace,
+      skillSelection: { id: 'guided-writing', name: 'Guided writing' },
+    },
+  ];
+
+  assert.equal(traceActivitiesForMessage(messages[0]).length, 2);
+  assert.deepEqual(traceActivitiesForMessage(messages[1]), []);
+  assert.equal(traceActivitiesForMessage(messages[2]).length, 2);
+});
+
+test('a selected skill is rendered as a completed Activity entry', () => {
+  assert.deepEqual(skillSelectionActivity('Build a skill'), {
+    title: 'Skill selected: Build a skill',
+    description: 'Selected skill “Build a skill”.',
     completed: true,
   });
+  assert.deepEqual(skillSelectionActivity('Research', true), {
+    title: 'Skill suggested: Research',
+    description: 'Suggested skill “Research” is waiting for your confirmation.',
+    completed: true,
+  });
+});
+
+test('legacy workflow selections remain visible in saved chat activity', () => {
+  assert.deepEqual(traceActivitiesForMessage({
+    role: 'assistant',
+    content: 'Would you like me to run this?',
+    workflowSelection: {
+      id: 'legacy-research',
+      name: 'Research',
+      requiresConfirmation: true,
+    },
+  }), [{
+    title: 'Skill suggested: Research',
+    description: 'Suggested skill “Research” is waiting for your confirmation.',
+    completed: true,
+  }]);
 });
 
 test('live trace snapshots retain earlier steps from the same run', () => {
@@ -95,6 +208,7 @@ test('trace timestamps are displayed as local clock times', () => {
 });
 
 test('trace activity has plain-language titles, outcomes, and run statuses', () => {
+  assert.equal(traceToolTitle({ name: 'get_tool_details' }), 'Get tool details');
   assert.equal(traceToolTitle({
     name: 'read_file',
     arguments: { path: 'src/app.ts' },
@@ -108,6 +222,7 @@ test('trace activity has plain-language titles, outcomes, and run statuses', () 
     arguments: { url: 'https://example.com/guide' },
     result: { title: 'Example guide' },
   }), 'Open web page');
+  assert.equal(traceToolTitle({ name: 'research_web' }), 'Research the web');
   assert.equal(traceToolStatusLabel('running'), 'Working…');
   assert.equal(traceToolStatusLabel('not_executed'), 'Skipped');
   assert.equal(traceToolDescription({
@@ -143,6 +258,21 @@ test('trace activity has plain-language titles, outcomes, and run statuses', () 
     recording: false,
     trace: { ...latest, steps: [{ status: 'complete' }] },
   }), 'Finished');
+});
+
+test('prefixed tool names retain human-readable trace activity', () => {
+  assert.equal(traceToolTitle({ name: 'document_read_file' }), 'Read project file');
+  assert.equal(traceToolTitle({ name: 'browser_read_page' }), 'Read web page');
+  assert.equal(traceToolTitle({ name: 'panel_list_tabs' }), 'List open tabs');
+  assert.equal(traceToolTitle({ name: 'tool_get_details' }), 'Get tool details');
+  assert.equal(traceToolActivity({
+    name: 'terminal_run_command',
+    status: 'needs_human',
+  }).title, 'Waiting for approval...');
+  assert.equal(traceRunStatus({
+    recording: true,
+    progress: { phase: 'using_tool', tool_name: 'document_read_file' },
+  }), 'Reading your files');
 });
 
 test('Activity shows a plain-text Decision and descriptions for each action', () => {
@@ -229,8 +359,35 @@ test('tool cards use waiting titles until complete, then include activity descri
     result: { title: 'Reference guide' },
   });
   assert.equal(complete.title, 'Open web page');
+  assert.equal(complete.toolName, 'open_web_page');
   assert.equal(complete.description, 'Opened “Reference guide” to check its information.');
   assert.equal(complete.completed, true);
+});
+
+test('tool activities identify the function and explain the input and outcome', () => {
+  const calculation = traceToolActivity({
+    name: 'calculate',
+    arguments: { expression: '2 + 2' },
+    status: 'success',
+    result: { result: 4 },
+  });
+  assert.deepEqual(calculation, {
+    title: 'Calculate',
+    toolName: 'calculate',
+    description: 'Calculated 2 + 2 to get 4.',
+    completed: true,
+  });
+
+  const research = traceToolActivity({
+    name: 'research_web',
+    arguments: { query: 'local weather' },
+    status: 'success',
+    result: {
+      sources: [{ status: 'read' }, { status: 'unread' }],
+    },
+  });
+  assert.equal(research.toolName, 'research_web');
+  assert.equal(research.description, 'Searched for “local weather” and read 1 page.');
 });
 
 test('live activity is Thinking without text until a decision is available', () => {
@@ -289,9 +446,14 @@ test('persisted tool lifecycle enriches one activity and supplies its duration',
     ],
   });
 
-  assert.deepEqual(activities.slice(1).map(({ title, description }) => ({ title, description })), [
+  assert.deepEqual(activities.slice(1).map(({ title, toolName, description }) => ({
+    title,
+    toolName,
+    description,
+  })), [
     {
       title: 'Read project file',
+      toolName: 'read_file',
       description: 'Read src/app.ts.',
     },
   ]);
@@ -359,7 +521,7 @@ test('Activity hides internal checks and context updates', () => {
     },
     {
       title: 'Run approved terminal command',
-      description: 'The approved command finished.',
+      description: 'Ran the approved command; it exited with code 0.',
     },
   ]);
   assert.equal(activities.every((activity) => !('details' in activity) && !('summary' in activity)), true);

@@ -25,7 +25,7 @@ test('desktop inference disables model reasoning', () => {
     gpuLayers: 0,
     threads: 4,
   });
-  assert.deepEqual(args.slice(args.indexOf('--ctx-size'), args.indexOf('--ctx-size') + 2), ['--ctx-size', '32768']);
+  assert.deepEqual(args.slice(args.indexOf('--ctx-size'), args.indexOf('--ctx-size') + 2), ['--ctx-size', '16384']);
   assert.deepEqual(args.slice(args.indexOf('--reasoning'), args.indexOf('--reasoning') + 2), ['--reasoning', 'off']);
   assert.ok(args.includes('--jinja'));
 });
@@ -148,11 +148,11 @@ test('desktop runtime restarts with the newly selected context window', async ()
 
   try {
     const firstEndpoint = await manager.ensureReady(() => {});
-    assert.equal(firstEndpoint.contextWindowTokens, 32_768);
+    assert.equal(firstEndpoint.contextWindowTokens, 16_384);
     manager.setContextWindowTokens(65_536);
     const restartedEndpoint = await manager.restart(() => {});
     assert.equal(restartedEndpoint.contextWindowTokens, 65_536);
-    assert.deepEqual((await readFile(launchLogPath, 'utf8')).trim().split('\n'), ['32768', '65536']);
+    assert.deepEqual((await readFile(launchLogPath, 'utf8')).trim().split('\n'), ['16384', '65536']);
   } finally {
     await manager.stop();
     await rm(root, { recursive: true, force: true });

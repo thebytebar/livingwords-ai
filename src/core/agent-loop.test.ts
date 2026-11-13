@@ -38,6 +38,7 @@ test('single-shot completion returns an append-only JSON-serializable trace and 
   assert.equal(result.stop_reason, 'task_complete');
   assert.equal(result.trace.steps.length, 1);
   assert.equal(result.trace.steps[0]?.status, 'complete');
+  assert.equal(result.trace.steps[0]?.output_token_limit, 1_200);
   assert.equal(result.trace.steps[0]?.thought, 'The task needs no tool.');
   assert.equal(result.metrics.total_tokens, 17);
   assert.equal(result.metrics.steps_taken, 1);
@@ -74,6 +75,364 @@ test('run forwards structured conversation history and streamed token chunks', a
   assert.deepEqual(tokens, ['The ', 'answer.']);
   assert.equal(result.finish_reason, 'stop');
   assert.equal(result.success, true);
+});
+
+test('long conversation history is compacted instead of rejected', async () => {
+  const history = Array.from({ length: 12 }, (_, index) => ({
+    role: index % 2 === 0 ? 'user' as const : 'assistant' as const,
+    content: `Message ${index + 1}: ${'context '.repeat(45)}`,
+  }));
+  let retainedHistory: readonly { role: string; content: string }[] = [];
+  let conversationSummary = '';
+  const result = await createAgentHarness({
+    model: {
+      async respond({ context }) {
+        retainedHistory = context.conversation_history;
+        conversationSummary = context.conversation_summary ?? '';
+        return { done: true, final_answer: 'I used the conversation context.' };
+      },
+    },
+    max_context_characters: 2_500,
+    max_summary_characters: 300,
+  }).run('Continue the conversation.', { history });
+
+  assert.equal(result.success, true);
+  assert.ok(retainedHistory.length < history.length);
+  assert.equal(retainedHistory.at(-1)?.content, history.at(-1)?.content);
+  assert.ok(conversationSummary.length > 0);
+  assert.match(conversationSummary, /Message \d+:/u);
+  assert.ok(result.trace.steps[0]?.context_compaction?.includes('conversation'));
+});
+
+test('only final-answer tokens are forwarded to the user', async () => {
+  const tokens: string[] = [];
+  let step = 0;
+  const result = await createAgentHarness({
+    model: {
+      async respond(_input, { on_token }) {
+        step += 1;
+        if (step === 1) {
+          on_token?.('I will search for that now.');
+          return { done: false, tool_calls: [{ name: 'lookup', arguments: {} }] };
+        }
+        on_token?.('Here is ');
+        on_token?.('the result.');
+        return { done: true, final_answer: 'Here is the result.' };
+      },
+    },
+    tools: [{
+      name: 'lookup',
+      description: 'Look up a value.',
+      async execute() {
+        return { value: 'ready' };
+      },
+    }],
+  }).run('Look up the value.', { on_token: (chunk) => tokens.push(chunk) });
+
+  assert.equal(result.success, true);
+  assert.deepEqual(tokens, ['Here is ', 'the result.']);
+});
+
+test('successful terminal tools complete the task without another model turn', async () => {
+  const tokens: string[] = [];
+  let modelCalls = 0;
+  const result = await createAgentHarness({
+    model: {
+      async respond(_input, { on_token }) {
+        modelCalls += 1;
+        on_token?.('I will keep working after the save.');
+        return { done: false, tool_calls: [{ name: 'save', arguments: {} }] };
+      },
+    },
+    tools: [{
+      name: 'save',
+      description: 'Save the completed item.',
+      final_answer_on_success: 'Saved.',
+      async execute() {
+        return { saved: true };
+      },
+    }],
+  }).run('Save this item.', { on_token: (chunk) => tokens.push(chunk) });
+
+  assert.equal(modelCalls, 1);
+  assert.equal(result.success, true);
+  assert.equal(result.stop_reason, 'task_complete');
+  assert.equal(result.final_answer, 'Saved.');
+  assert.equal(result.trace.steps[0]?.final_answer, 'Saved.');
+  assert.deepEqual(tokens, ['Saved.']);
+});
+
+test('terminal tool completion messages must fit the configured observation limit', () => {
+  assert.throws(() => createAgentHarness({
+    model: scriptedModel([]),
+    max_observation_characters: 4,
+    tools: [{
+      name: 'save',
+      description: 'Save the completed item.',
+      final_answer_on_success: 'Saved.',
+      async execute() {
+        return { saved: true };
+      },
+    }],
+  }), /completion message exceeds max_observation_characters/u);
+});
+
+test('tool discovery exposes details first, then makes only requested tools callable', async () => {
+  const modelInputs: Array<{
+    tools: readonly { name: string; input_schema?: unknown }[];
+    tool_choice?: unknown;
+  }> = [];
+  let executions = 0;
+  const result = await createAgentHarness({
+    system_prompt: 'Use tools when needed.',
+    tool_discovery: { initial_tool_names: [] },
+    required_tool_names: ['lookup'],
+    tools: [{
+      name: 'lookup',
+      description: 'Look up a value from the local catalog.',
+      input_schema: {
+        type: 'object',
+        properties: { key: { type: 'string' } },
+        required: ['key'],
+        additionalProperties: false,
+      },
+      async execute(args) {
+        executions += 1;
+        return { value: (args as { key: string }).key };
+      },
+    }],
+    model: {
+      async respond(input) {
+        modelInputs.push({ tools: input.tools, tool_choice: input.tool_choice });
+        if (input.context.step_number === 1) {
+          assert.match(input.system_prompt, /lookup: Look up a value/u);
+          assert.deepEqual(input.tools.map(({ name }) => name), ['tool_get_details']);
+          return {
+            done: false,
+            tool_calls: [{ name: 'tool_get_details', arguments: { names: ['lookup'] } }],
+          };
+        }
+        if (input.context.step_number === 2) {
+          assert.deepEqual(input.tools.map(({ name }) => name), ['lookup', 'tool_get_details']);
+          assert.deepEqual(input.tools[0]?.input_schema, {
+            type: 'object',
+            properties: { key: { type: 'string' } },
+            required: ['key'],
+            additionalProperties: false,
+          });
+          return { done: false, tool_calls: [{ name: 'lookup', arguments: { key: 'answer' } }] };
+        }
+        return { done: true, final_answer: 'Looked up the value.' };
+      },
+    },
+  }).run('Look up the value.');
+
+  assert.equal(result.success, true);
+  assert.equal(executions, 1);
+  assert.equal(modelInputs[0]?.tool_choice && typeof modelInputs[0].tool_choice === 'object'
+    && (modelInputs[0].tool_choice as { function?: { name?: string } }).function?.name,
+  'tool_get_details');
+  assert.equal(modelInputs[1]?.tool_choice && typeof modelInputs[1].tool_choice === 'object'
+    && (modelInputs[1].tool_choice as { function?: { name?: string } }).function?.name,
+  'lookup');
+  assert.deepEqual(
+    result.trace.steps.map((step) => step.tool_calls?.[0]?.name),
+    ['tool_get_details', 'lookup', undefined],
+  );
+  assert.equal(
+    (result.trace.steps[0]?.observation?.[0]?.result as { tools: { name: string }[] }).tools[0]?.name,
+    'lookup',
+  );
+});
+
+test('active skill names are not treated as tools during tool discovery', async () => {
+  const systemPrompts: string[] = [];
+  const result = await createAgentHarness({
+    tool_discovery: { initial_tool_names: [] },
+    tools: [{
+      name: 'lookup',
+      description: 'Look up a value.',
+      async execute() {
+        return { value: 'ready' };
+      },
+    }],
+    model: {
+      async respond(input) {
+        systemPrompts.push(input.system_prompt);
+        if (input.context.step_number === 1) {
+          return {
+            done: false,
+            tool_calls: [{
+              name: 'tool_get_details',
+              arguments: { names: ['Ask The Bible'] },
+            }],
+          };
+        }
+        return { done: true, final_answer: 'I followed the active skill.' };
+      },
+    },
+  }).run('Should non-Christians partake in Holy Communion?', {
+    supplemental_context: {
+      active_skill: {
+        name: 'Ask The Bible',
+        prompt: 'Find relevant KJV passages and explain them.',
+      },
+    },
+  });
+
+  assert.equal(result.success, true);
+  assert.match(systemPrompts[0] ?? '', /active_skill.*task guidance, not a tool/u);
+  assert.match(
+    result.trace.steps[0]?.observation?.[0]?.error ?? '',
+    /active skill.*not a registered tool.*Follow active_skill\.prompt/u,
+  );
+  assert.equal(result.final_answer, 'I followed the active skill.');
+});
+
+test('a required tool cannot be bypassed by returning a final answer', async () => {
+  let executions = 0;
+  const toolChoices: unknown[] = [];
+  const result = await createAgentHarness({
+    tool_discovery: { initial_tool_names: ['skill_save'] },
+    required_tool_names: ['skill_save'],
+    tools: [{
+      name: 'skill_save',
+      description: 'Save the completed skill.',
+      final_answer_on_success: 'Skill saved.',
+      async execute() {
+        executions += 1;
+        return { saved: true };
+      },
+    }],
+    model: {
+      async respond(input) {
+        toolChoices.push(input.tool_choice);
+        if (input.context.step_number === 1) {
+          return { done: true, final_answer: 'Here is a skill draft.' };
+        }
+        return {
+          done: false,
+          tool_calls: [{ name: 'skill_save', arguments: {} }],
+        };
+      },
+    },
+  }).run('Create a skill.');
+
+  assert.equal(result.success, true);
+  assert.equal(result.final_answer, 'Skill saved.');
+  assert.equal(executions, 1);
+  assert.deepEqual(toolChoices, [
+    { type: 'function', function: { name: 'skill_save' } },
+    { type: 'function', function: { name: 'skill_save' } },
+  ]);
+  assert.equal(result.trace.steps[0]?.status, 'rejected');
+  assert.match(result.trace.steps[0]?.error ?? '', /must succeed before the task can be completed/u);
+});
+
+test('tool discovery rejects requests for unknown or disallowed capabilities', async () => {
+  let executions = 0;
+  const result = await createAgentHarness({
+    tool_discovery: { initial_tool_names: [] },
+    tools: [{
+      name: 'lookup',
+      description: 'Look up a value.',
+      async execute() {
+        executions += 1;
+        return { value: 'ready' };
+      },
+    }],
+    model: scriptedModel([
+      { done: false, tool_calls: [{ name: 'tool_get_details', arguments: { names: ['delete_data'] } }] },
+      { done: true, final_answer: 'That capability is unavailable.' },
+    ]),
+  }).run('Look up the value.');
+
+  assert.equal(result.success, true);
+  assert.equal(result.stop_reason, 'task_complete');
+  assert.equal(executions, 0);
+  assert.equal(result.trace.steps[0]?.status, 'rejected');
+  assert.match(result.trace.steps[0]?.observation?.[0]?.error ?? '', /not available/u);
+});
+
+test('duplicate successful tool calls get one correction attempt', async () => {
+  let executions = 0;
+  const result = await createAgentHarness({
+    model: scriptedModel([
+      { done: false, tool_calls: [{ name: 'web_search', arguments: { query: 'Tesla stock' } }] },
+      { done: false, tool_calls: [{ name: 'web_search', arguments: { query: '  TESLA   STOCK  ' } }] },
+      { done: true, final_answer: 'I used the existing search result.' },
+    ]),
+    tools: [{
+      name: 'web_search',
+      description: 'Search the web.',
+      async execute() {
+        executions += 1;
+        return { results: ['price page'] };
+      },
+    }],
+  }).run('Find the stock price.');
+
+  assert.equal(result.success, true);
+  assert.equal(executions, 1);
+  assert.equal(result.trace.steps[1]?.status, 'rejected');
+  assert.ok(result.trace.steps[1]?.guardrail_decisions.some(({ rule }) => rule === 'duplicate_tool_call'));
+  assert.match(result.trace.steps[1]?.observation?.[0]?.error ?? '', /already succeeded in step 1/u);
+  assert.equal(result.final_answer, 'I used the existing search result.');
+});
+
+test('duplicate calls in one model step are not both executed', async () => {
+  let executions = 0;
+  const result = await createAgentHarness({
+    model: scriptedModel([
+      {
+        done: false,
+        tool_calls: [
+          { name: 'lookup', arguments: { key: 'value' } },
+          { name: 'lookup', arguments: { key: 'value' } },
+        ],
+      },
+      { done: true, final_answer: 'I used the available lookup result.' },
+    ]),
+    tools: [{
+      name: 'lookup',
+      description: 'Look up a value.',
+      async execute() {
+        executions += 1;
+        return { value: 'ready' };
+      },
+    }],
+  }).run('Look up the value.');
+
+  assert.equal(result.success, true);
+  assert.equal(executions, 0);
+  assert.equal(result.trace.steps[0]?.status, 'rejected');
+  assert.ok(result.trace.steps[0]?.guardrail_decisions.some(({ rule }) => rule === 'duplicate_tool_call'));
+});
+
+test('persistent duplicate tool calls stop instead of exhausting the run', async () => {
+  let executions = 0;
+  const result = await createAgentHarness({
+    model: scriptedModel([
+      { done: false, tool_calls: [{ name: 'web_search', arguments: { query: 'Tesla stock' } }] },
+      { done: false, tool_calls: [{ name: 'web_search', arguments: { query: 'Tesla stock' } }] },
+      { done: false, tool_calls: [{ name: 'web_search', arguments: { query: 'Tesla stock' } }] },
+      { done: true, final_answer: 'Should not run.' },
+    ]),
+    tools: [{
+      name: 'web_search',
+      description: 'Search the web.',
+      async execute() {
+        executions += 1;
+        return { results: ['price page'] };
+      },
+    }],
+  }).run('Find the stock price.');
+
+  assert.equal(result.success, false);
+  assert.equal(result.stop_reason, 'guardrail_violation');
+  assert.equal(executions, 1);
+  assert.equal(result.trace.steps.length, 3);
+  assert.ok(result.trace.steps[2]?.guardrail_decisions.some(({ rule }) => rule === 'duplicate_tool_call'));
 });
 
 test('multiple tool calls execute within one step and receive deterministic verification', async () => {
@@ -291,8 +650,8 @@ test('folder inspection and file reads are model-invoked calls in the structured
           return {
             done: false,
             tool_calls: [
-              { name: 'inspect_folder', arguments: { folderId } },
-              { name: 'read_file', arguments: { folderId, path: 'app.ts' } },
+              { name: 'document_inspect_folder', arguments: { folderId } },
+              { name: 'document_read_file', arguments: { folderId, path: 'app.ts' } },
             ],
           };
         }
@@ -309,20 +668,20 @@ test('folder inspection and file reads are model-invoked calls in the structured
   assert.equal(scans, 1);
   assert.equal(reads, 1);
   assert.deepEqual(result.trace.steps[0]?.tool_calls?.map(({ name }) => name), [
-    'inspect_folder',
-    'read_file',
+    'document_inspect_folder',
+    'document_read_file',
   ]);
   assert.deepEqual(result.trace.steps[0]?.observation?.map(({ status }) => status), [
     'success',
     'success',
   ]);
   assert.deepEqual(events, [
-    'inspect_folder:pending',
-    'read_file:pending',
-    'inspect_folder:running',
-    'inspect_folder:success',
-    'read_file:running',
-    'read_file:success',
+    'document_inspect_folder:pending',
+    'document_read_file:pending',
+    'document_inspect_folder:running',
+    'document_inspect_folder:success',
+    'document_read_file:running',
+    'document_read_file:success',
   ]);
   assert.deepEqual(documentContext.resultData().contextUsage.map(({ method }) => method), [
     'folder-overview',
@@ -444,8 +803,8 @@ test('max_steps is a hard bound and its stop decision is recorded', async () => 
   let calls = 0;
   const result = await createAgentHarness({
     model: scriptedModel([
-      { done: false, tool_calls: [{ name: 'tick', arguments: {} }] },
-      { done: false, tool_calls: [{ name: 'tick', arguments: {} }] },
+      { done: false, tool_calls: [{ name: 'tick', arguments: { index: 1 } }] },
+      { done: false, tool_calls: [{ name: 'tick', arguments: { index: 2 } }] },
       { done: true, final_answer: 'Should not run.' },
     ], () => calls++),
     tools: [{
@@ -462,6 +821,84 @@ test('max_steps is a hard bound and its stop decision is recorded', async () => 
   assert.equal(result.trace.steps.length, 2);
   assert.equal(result.stop_reason, 'max_steps');
   assert.ok(result.trace.steps[1]?.guardrail_decisions.some(({ rule }) => rule === 'max_steps'));
+});
+
+test('tool turns are bounded, explicitly selected tools are forced, and the penultimate turn asks for an answer', async () => {
+  const inputs: Array<{
+    tool_choice?: unknown;
+    max_output_tokens?: number;
+    temperature?: number;
+    turn_instruction?: string;
+  }> = [];
+  const progress: Array<{ output_token_limit?: number }> = [];
+  const result = await createAgentHarness({
+    model: {
+      async respond(input) {
+        inputs.push(input);
+        return inputs.length === 1
+          ? { done: false, tool_calls: [{ name: 'lookup', arguments: { query: 'Ada' } }] }
+          : { done: true, final_answer: 'Ada Lovelace.' };
+      },
+    },
+    tools: [{
+      name: 'lookup',
+      description: 'Look up a fact.',
+      async execute() {
+        return { result: 'Ada Lovelace' };
+      },
+    }],
+    max_steps: 3,
+    max_tool_calls_per_step: 1,
+    required_tool_names: ['lookup'],
+    on_progress: (event) => progress.push(event),
+  }).run('Who was Ada Lovelace?');
+
+  assert.equal(result.success, true);
+  assert.deepEqual(inputs[0]?.tool_choice, {
+    type: 'function',
+    function: { name: 'lookup' },
+  });
+  assert.equal(inputs[0]?.max_output_tokens, 320);
+  assert.equal(result.trace.steps[0]?.output_token_limit, 320);
+  assert.equal(result.trace.steps[1]?.output_token_limit, 320);
+  assert.equal(
+    progress.filter((event) => event.output_token_limit !== undefined).at(-1)?.output_token_limit,
+    320,
+  );
+  assert.equal(inputs[0]?.temperature, 0);
+  assert.equal(inputs[1]?.turn_instruction, 'Answer now from the results you have.');
+});
+
+test('host tool calls pass through execution guards and the last model turn forbids tools', async () => {
+  let modelCalls = 0;
+  let lastToolChoice: unknown;
+  const result = await createAgentHarness({
+    model: {
+      async respond(input) {
+        modelCalls += 1;
+        lastToolChoice = input.tool_choice;
+        return { done: true, final_answer: 'The result is 6.' };
+      },
+    },
+    tools: [{
+      name: 'calculator_evaluate',
+      description: 'Calculate a simple expression.',
+      validate_input(args) {
+        return typeof args.expression === 'string' ? null : 'An expression is required.';
+      },
+      async execute(args) {
+        return { result: args.expression === '2*3' ? 6 : 0 };
+      },
+    }],
+    max_steps: 2,
+  }).run('What is 2*3?', {
+    initial_tool_calls: [{ name: 'calculator_evaluate', arguments: { expression: '2*3' } }],
+  });
+
+  assert.equal(result.success, true);
+  assert.equal(modelCalls, 1);
+  assert.equal(result.trace.steps[0]?.observation?.[0]?.result !== undefined, true);
+  assert.equal(lastToolChoice, 'none');
 });
 
 test('force-stop signals produce a structured stop record', async () => {
@@ -589,9 +1026,9 @@ test('verification and step-observer failures remain visible without duplicating
 test('older steps are summarized and recent structured context is retained', async () => {
   const contexts: Array<{ summary: string; recent_steps: number[] }> = [];
   const responses = [
-    ...Array.from({ length: 5 }, () => ({
+    ...Array.from({ length: 5 }, (_, index) => ({
       done: false,
-      tool_calls: [{ name: 'tick', arguments: {} }],
+      tool_calls: [{ name: 'tick', arguments: { index } }],
     })),
     { done: true, final_answer: 'All five operations completed.' },
   ];
@@ -660,7 +1097,76 @@ test('a large last observation is reduced to stay within the configured context 
   assert.match(result.trace.steps[1]?.context_compaction ?? '', /Reduced the latest/u);
 });
 
-test('bounded file-read observations remain available to the next model turn', async () => {
+test('full prompt budgeting includes system and tool schemas and records compacted input metrics', async () => {
+  const result = await createAgentHarness({
+    model: {
+      async respond({ context }) {
+        return context.step_number === 1
+          ? { done: false, tool_calls: [{ name: 'read_large_value', arguments: {} }] }
+          : { done: true, final_answer: 'The value was reviewed.' };
+      },
+    },
+    system_prompt: 'System instructions. '.repeat(60),
+    tools: [{
+      name: 'read_large_value',
+      description: 'Read an excerpt.',
+      input_schema: { type: 'object', properties: { path: { type: 'string' } } },
+      async execute() {
+        return 'x'.repeat(4_000);
+      },
+    }],
+    context_window_tokens: 1_024,
+    response_token_limit: 128,
+    context_safety_margin_tokens: 128,
+    max_context_characters: 8_000,
+  }).run('Read and review the large value.', {
+    runtime_metrics: { queue_wait_ms: 17, skill_routing_ms: 23 },
+  });
+
+  const lastStep = result.trace.steps.at(-1);
+  assert.equal(result.success, true);
+  assert.deepEqual(result.trace.runtime_metrics, {
+    queue_wait_ms: 17,
+    skill_routing_ms: 23,
+  });
+  assert.ok(lastStep);
+  assert.ok(lastStep.input_characters_before_compaction! > lastStep.input_characters_after_compaction!);
+  assert.ok(lastStep.estimated_prompt_tokens! <= 768);
+  assert.equal(lastStep.prompt_estimate_method, 'serialized_chars_div_4');
+  assert.ok(lastStep.context_assembly_ms! >= 0);
+  assert.ok(lastStep.model_latency_ms! >= 0);
+});
+
+test('reported prompt usage calibrates later context estimates', async () => {
+  const result = await createAgentHarness({
+    model: {
+      async respond({ context }) {
+        return context.step_number === 1
+          ? {
+            done: false,
+            tool_calls: [{ name: 'read_value', arguments: {} }],
+            token_usage: { input_tokens: 200 },
+          }
+          : { done: true, final_answer: 'The value was reviewed.' };
+      },
+    },
+    tools: [{
+      name: 'read_value',
+      description: 'Read a value.',
+      async execute() {
+        return 'x'.repeat(1_000);
+      },
+    }],
+  }).run('Read the value.');
+
+  const nextStep = result.trace.steps[1];
+  assert.equal(result.success, true);
+  assert.equal(nextStep?.prompt_estimate_method, 'runtime_usage_calibrated');
+  assert.ok(nextStep);
+  assert.ok(nextStep.estimated_prompt_tokens! > Math.ceil(nextStep.input_characters_after_compaction! / 4));
+});
+
+test('model context compacts file-read observations while the full trace remains available', async () => {
   let nextObservation = '';
   const result = await createAgentHarness({
     model: {
@@ -668,7 +1174,7 @@ test('bounded file-read observations remain available to the next model turn', a
         if (context.step_number === 1) {
           return {
             done: false,
-            tool_calls: [{ name: 'read_file', arguments: {} }],
+            tool_calls: [{ name: 'document_read_file', arguments: {} }],
           };
         }
         nextObservation = JSON.stringify(context.recent_steps[0]?.observation);
@@ -676,7 +1182,7 @@ test('bounded file-read observations remain available to the next model turn', a
       },
     },
     tools: [{
-      name: 'read_file',
+      name: 'document_read_file',
       description: 'Read a bounded file excerpt.',
       async execute() {
         return { path: 'src/application.ts', excerpt: 'x'.repeat(3_500) };
@@ -687,8 +1193,12 @@ test('bounded file-read observations remain available to the next model turn', a
   }).run('Review the file.');
 
   assert.equal(result.success, true);
-  assert.ok(nextObservation.length > 3_500);
+  assert.ok(nextObservation.length <= 2_500);
   assert.match(nextObservation, /application\.ts/u);
+  assert.ok(JSON.stringify(JSON.parse(nextObservation)[0].result).length <= 1_800);
+  const traceObservation = result.trace.steps[0]?.observation?.[0]?.result;
+  assert.ok(traceObservation && typeof traceObservation === 'object' && !Array.isArray(traceObservation));
+  assert.equal(traceObservation.excerpt?.length, 3_500);
 });
 
 test('tool errors stop runs while rejected inputs can be corrected on a later step', async () => {

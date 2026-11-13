@@ -207,7 +207,7 @@ test('assistant service gates terminal commands and continues with bounded untru
         return {
           answer: '',
           finishReason: 'tool_calls',
-          toolCalls: [{ name: 'run_terminal_command', arguments: '{"command":"pwd"}' }],
+          toolCalls: [{ name: 'terminal_run_command', arguments: '{"command":"pwd"}' }],
         };
       }
       return { answer: 'The working directory is /workspace.', finishReason: 'stop' };
@@ -245,7 +245,7 @@ test('assistant service shows attached file edits for approval before continuing
           answer: '',
           finishReason: 'tool_calls',
           toolCalls: [{
-            name: 'propose_document_edit',
+            name: 'document_propose_edit',
             arguments: JSON.stringify({ documentId, content: 'Updated file text.' }),
           }],
         };
@@ -292,7 +292,7 @@ test('assistant searches attached documents on demand and cites returned passage
           answer: '',
           finishReason: 'tool_calls',
           toolCalls: [{
-            name: 'search_attached_documents',
+            name: 'document_search_attached',
             arguments: JSON.stringify({ query: 'widget lifecycle', includeIgnored: true }),
           }],
         };
@@ -302,7 +302,7 @@ test('assistant searches attached documents on demand and cites returned passage
           answer: '',
           finishReason: 'tool_calls',
           toolCalls: [{
-            name: 'read_attached_document',
+            name: 'document_read_attached',
             arguments: JSON.stringify({ documentId, query: 'shutdown behavior' }),
           }],
         };
@@ -380,7 +380,7 @@ test('assistant progressively lists, reads, and greps attached folders with boun
           answer: '',
           finishReason: 'tool_calls',
           toolCalls: [{
-            name: 'list_directory',
+            name: 'document_list_directory',
             arguments: JSON.stringify({ folderId, path: 'src', depth: 2 }),
           }],
         };
@@ -390,7 +390,7 @@ test('assistant progressively lists, reads, and greps attached folders with boun
           answer: '',
           finishReason: 'tool_calls',
           toolCalls: [{
-            name: 'read_file',
+            name: 'document_read_file',
             arguments: JSON.stringify({ folderId, path: 'src/main.ts', offset: 10, limit: 20 }),
           }],
         };
@@ -400,7 +400,7 @@ test('assistant progressively lists, reads, and greps attached folders with boun
           answer: '',
           finishReason: 'tool_calls',
           toolCalls: [{
-            name: 'grep',
+            name: 'document_grep',
             arguments: JSON.stringify({ folderId, pattern: 'initialize', path: 'src', glob: '*.ts' }),
           }],
         };
@@ -473,7 +473,7 @@ test('assistant progressively lists, reads, and greps attached folders with boun
   assert.match(prompts[0], /project-guidance path="AGENTS\.md"/u);
   assert.match(prompts[0], /untrusted local data.*subordinate to system and developer instructions/u);
   assert.doesNotMatch(prompts[0], /export function initialize/u);
-  assert.match(prompts[1], /folder-tool-output label="list_directory src"/u);
+  assert.match(prompts[1], /folder-tool-output label="document_list_directory src"/u);
   assert.match(prompts[2], /export function initialize/u);
   assert.match(prompts[3], /src\/main\.ts:11/u);
   assert.deepEqual(usedDocumentIds, [instructionId, readId, grepId]);
@@ -526,7 +526,7 @@ test('assistant service rejects command requests unless a terminal command handl
     generate: async () => ({
       answer: '',
       finishReason: 'tool_calls',
-      toolCalls: [{ name: 'run_terminal_command', arguments: '{"command":"pwd"}' }],
+      toolCalls: [{ name: 'terminal_run_command', arguments: '{"command":"pwd"}' }],
     }),
   });
 

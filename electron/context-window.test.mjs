@@ -3,18 +3,20 @@ import test from 'node:test';
 import {
   CONTEXT_WINDOW_PRESETS,
   DEFAULT_CONTEXT_WINDOW_TOKENS,
+  MAX_TOOL_TURN_OUTPUT_TOKENS,
   contextWindowPreset,
   isContextWindowTokens,
   responseTokenLimitForContext,
   validateContextWindowTokens,
 } from './context-window.mjs';
 
-test('context window presets default to 32K and map to their response limits', () => {
-  assert.equal(DEFAULT_CONTEXT_WINDOW_TOKENS, 32_768);
+test('context window presets default to 16K and cap responses for the local model', () => {
+  assert.equal(DEFAULT_CONTEXT_WINDOW_TOKENS, 16_384);
+  assert.equal(MAX_TOOL_TURN_OUTPUT_TOKENS, 1_500);
   assert.deepEqual(CONTEXT_WINDOW_PRESETS.map(({ label }) => label), ['8K', '16K', '32K', '64K', '128K']);
   assert.deepEqual(
     CONTEXT_WINDOW_PRESETS.map(({ tokens }) => responseTokenLimitForContext(tokens)),
-    [2_000, 4_000, 8_000, 10_000, 10_000],
+    [2_000, 3_000, 3_000, 3_000, 3_000],
   );
 });
 

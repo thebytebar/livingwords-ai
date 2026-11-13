@@ -2,7 +2,7 @@ import { validateBrowserPageUrl } from './browser-manager.mjs';
 
 export const DEFAULT_WEB_SEARCH_PROVIDER = 'duckduckgo';
 export const WEB_SEARCH_PROVIDERS = Object.freeze([
-  { id: 'duckduckgo', name: 'DuckDuckGo Lite' },
+  { id: 'duckduckgo', name: 'DuckDuckGo' },
 ]);
 
 const MAX_SEARCH_QUERY_LENGTH = 500;
@@ -46,7 +46,7 @@ export async function searchWeb({ query, provider: rawProvider, searchImpl, sign
   }
   const provider = validateWebSearchProvider(rawProvider);
   if (typeof searchImpl !== 'function') {
-    throw new TypeError('Web search requires a DuckDuckGo Lite browser integration.');
+    throw new TypeError('Web search requires a DuckDuckGo search integration.');
   }
   if (signal?.aborted) throw signal.reason ?? new Error('Web search was cancelled.');
 
@@ -74,8 +74,8 @@ export function createWebSearchAgentTool({
     throw new TypeError('Web search tool configuration is invalid.');
   }
   return {
-    name: 'search_web',
-    description: 'Search the public web through DuckDuckGo Lite (lite.duckduckgo.com). Search results are provided by DuckDuckGo; cite result URLs and use open_web_page and read_web_page to verify promising sources.',
+    name: 'web_search',
+    description: 'Search the public web through DuckDuckGo. Search results are provided by DuckDuckGo; cite result URLs and use browser_open_page and browser_read_page to verify promising sources.',
     permission: 'allow',
     input_schema: {
       type: 'object',

@@ -10,10 +10,11 @@ contextBridge.exposeInMainWorld('livingWords', Object.freeze({
     ipcRenderer.invoke('livingwords:web-search-settings:set', provider),
   searchWeb: (sessionId, query) =>
     ipcRenderer.invoke('livingwords:web-search:query', sessionId, query),
-  listWorkflows: () => ipcRenderer.invoke('livingwords:workflows:list'),
-  saveWorkflow: (workflow) => ipcRenderer.invoke('livingwords:workflows:save', workflow),
-  reorderWorkflows: (ids) => ipcRenderer.invoke('livingwords:workflows:reorder', ids),
-  deleteWorkflow: (id) => ipcRenderer.invoke('livingwords:workflows:delete', id),
+  openWebSearch: (sessionId) =>
+    ipcRenderer.invoke('livingwords:web-search:open', sessionId),
+  listSkills: () => ipcRenderer.invoke('livingwords:skills:list'),
+  saveSkill: (skill) => ipcRenderer.invoke('livingwords:skills:save', skill),
+  deleteSkill: (id) => ipcRenderer.invoke('livingwords:skills:delete', id),
   setBrowserBounds: (sessionId, browserTabId, bounds, visible, viewportSize) =>
     ipcRenderer.invoke('livingwords:browser:bounds', sessionId, browserTabId, bounds, visible, viewportSize),
   searchBrowser: (sessionId, browserTabId, query) =>
@@ -41,8 +42,27 @@ contextBridge.exposeInMainWorld('livingWords', Object.freeze({
   createSession: () => ipcRenderer.invoke('livingwords:sessions:create'),
   saveSession: (session) => ipcRenderer.invoke('livingwords:sessions:save', session),
   deleteSession: (id) => ipcRenderer.invoke('livingwords:sessions:delete', id),
-  ask: (requestId, sessionId, question, history, rightPanelTabs) =>
-    ipcRenderer.invoke('livingwords:ask', requestId, sessionId, question, history, rightPanelTabs),
+  ask: (
+    requestId,
+    sessionId,
+    question,
+    history,
+    rightPanelTabs,
+    selectedToolNames,
+    taggedQuestion,
+    selectedSkillId,
+  ) =>
+    ipcRenderer.invoke(
+      'livingwords:ask',
+      requestId,
+      sessionId,
+      question,
+      history,
+      rightPanelTabs,
+      selectedToolNames,
+      taggedQuestion,
+      selectedSkillId,
+    ),
   createTerminal: (request) => ipcRenderer.invoke('livingwords:terminal:create', request),
   writeTerminal: (terminalId, data) => ipcRenderer.invoke('livingwords:terminal:write', terminalId, data),
   resizeTerminal: (terminalId, cols, rows) =>
@@ -77,17 +97,17 @@ contextBridge.exposeInMainWorld('livingWords', Object.freeze({
     ipcRenderer.on('livingwords:document:edit-request', handler);
     return () => ipcRenderer.removeListener('livingwords:document:edit-request', handler);
   },
-  onWorkflowCreated: (listener) => {
-    if (typeof listener !== 'function') throw new TypeError('Workflow created listener must be a function.');
+  onSkillCreated: (listener) => {
+    if (typeof listener !== 'function') throw new TypeError('Skill created listener must be a function.');
     const handler = (_event, request) => listener(request);
-    ipcRenderer.on('livingwords:workflow:created', handler);
-    return () => ipcRenderer.removeListener('livingwords:workflow:created', handler);
+    ipcRenderer.on('livingwords:skill:created', handler);
+    return () => ipcRenderer.removeListener('livingwords:skill:created', handler);
   },
-  onWorkflowsUpdated: (listener) => {
-    if (typeof listener !== 'function') throw new TypeError('Workflows updated listener must be a function.');
-    const handler = (_event, workflows) => listener(workflows);
-    ipcRenderer.on('livingwords:workflows:updated', handler);
-    return () => ipcRenderer.removeListener('livingwords:workflows:updated', handler);
+  onSkillsUpdated: (listener) => {
+    if (typeof listener !== 'function') throw new TypeError('Skills updated listener must be a function.');
+    const handler = (_event, skills) => listener(skills);
+    ipcRenderer.on('livingwords:skills:updated', handler);
+    return () => ipcRenderer.removeListener('livingwords:skills:updated', handler);
   },
   cancel: (requestId) => ipcRenderer.invoke('livingwords:cancel', requestId),
   onOpenSettings: (listener) => {
@@ -113,12 +133,6 @@ contextBridge.exposeInMainWorld('livingWords', Object.freeze({
     const handler = (_event, status) => listener(status);
     ipcRenderer.on('livingwords:request-status', handler);
     return () => ipcRenderer.removeListener('livingwords:request-status', handler);
-  },
-  onRequestChunk: (listener) => {
-    if (typeof listener !== 'function') throw new TypeError('Response chunk listener must be a function.');
-    const handler = (_event, chunk) => listener(chunk);
-    ipcRenderer.on('livingwords:request-chunk', handler);
-    return () => ipcRenderer.removeListener('livingwords:request-chunk', handler);
   },
   onRequestTrace: (listener) => {
     if (typeof listener !== 'function') throw new TypeError('Request trace listener must be a function.');
@@ -149,5 +163,23 @@ contextBridge.exposeInMainWorld('livingWords', Object.freeze({
     const handler = (_event, event) => listener(event);
     ipcRenderer.on('livingwords:web-search:results', handler);
     return () => ipcRenderer.removeListener('livingwords:web-search:results', handler);
+  },
+  onWebSearchStart: (listener) => {
+    if (typeof listener !== 'function') throw new TypeError('Web search start listener must be a function.');
+    const handler = (_event, event) => listener(event);
+    ipcRenderer.on('livingwords:web-search:start', handler);
+    return () => ipcRenderer.removeListener('livingwords:web-search:start', handler);
+  },
+  onWebSearchError: (listener) => {
+    if (typeof listener !== 'function') throw new TypeError('Web search error listener must be a function.');
+    const handler = (_event, event) => listener(event);
+    ipcRenderer.on('livingwords:web-search:error', handler);
+    return () => ipcRenderer.removeListener('livingwords:web-search:error', handler);
+  },
+  onRightPanelTabClosed: (listener) => {
+    if (typeof listener !== 'function') throw new TypeError('Right-panel tab listener must be a function.');
+    const handler = (_event, event) => listener(event);
+    ipcRenderer.on('livingwords:right-panel:tab-closed', handler);
+    return () => ipcRenderer.removeListener('livingwords:right-panel:tab-closed', handler);
   },
 }));

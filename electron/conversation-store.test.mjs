@@ -22,6 +22,7 @@ function exampleTrace() {
       error: null,
       status: 'complete',
       token_usage: { input_tokens: 10, output_tokens: 6, total_tokens: 16 },
+      output_token_limit: 1_200,
       latency_ms: 125,
       guardrail_decisions: [],
       verification: [],
@@ -103,6 +104,51 @@ test('local conversation store persists selected documents and verified citation
   }
 });
 
+test('local conversation store persists validated chat composer formatting', async () => {
+  const directory = await mkdtemp(join(tmpdir(), 'livingwords-conversations-formatting-'));
+  const filePath = join(directory, 'conversations.json');
+  const store = createConversationStore(filePath);
+
+  try {
+    const session = await store.create();
+    const updated = {
+      ...session,
+      messages: [{
+        role: 'user',
+        content: 'Please /Research @search_web',
+        formattingTokens: [
+          { start: 7, end: 16, kind: 'skill' },
+          { start: 17, end: 28, kind: 'tool' },
+        ],
+      }],
+    };
+    await store.save(updated);
+    assert.deepEqual(await createConversationStore(filePath).get(session.id), updated);
+    await assert.rejects(store.save({
+      ...updated,
+      messages: [{
+        ...updated.messages[0],
+        formattingTokens: [{ start: 7, end: 16, kind: 'tool' }],
+      }],
+    }), /invalid composer formatting/u);
+
+    await writeFile(filePath, JSON.stringify([{
+      ...updated,
+      messages: [{
+        role: 'user',
+        content: 'Please /Research',
+        formattingTokens: [{ start: 7, end: 16, kind: 'workflow' }],
+      }],
+    }]));
+    const restored = await createConversationStore(filePath).get(session.id);
+    assert.deepEqual(restored.messages[0].formattingTokens, [
+      { start: 7, end: 16, kind: 'skill' },
+    ]);
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
 test('local conversation store persists validated bounded traces with assistant responses', async () => {
   const directory = await mkdtemp(join(tmpdir(), 'livingwords-conversations-traces-'));
   const filePath = join(directory, 'conversations.json');
@@ -124,6 +170,64 @@ test('local conversation store persists validated bounded traces with assistant 
     assert.deepEqual(await createConversationStore(filePath).get(session.id), updated);
     assert.deepEqual(JSON.parse(await readFile(filePath, 'utf8'))[0].messages[0].trace, trace);
     assert.equal(JSON.parse(await readFile(filePath, 'utf8'))[0].messages[0].generationDurationMs, 4_250);
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
+test('local conversation store persists content-free agent performance metrics', async () => {
+  const directory = await mkdtemp(join(tmpdir(), 'livingwords-conversations-metrics-'));
+  const filePath = join(directory, 'conversations.json');
+  const store = createConversationStore(filePath);
+  const baseTrace = exampleTrace();
+  const trace = {
+    ...baseTrace,
+    runtime_metrics: { queue_wait_ms: 21, skill_routing_ms: 14 },
+    steps: [{
+      ...baseTrace.steps[0],
+      context_assembly_ms: 3,
+      model_latency_ms: 2_104,
+      tool_execution_ms: 540,
+      input_characters_before_compaction: 9_000,
+      input_characters_after_compaction: 4_000,
+      estimated_prompt_tokens: 1_000,
+      prompt_estimate_method: 'serialized_chars_div_4',
+    }],
+  };
+
+  try {
+    const session = await store.create();
+    await store.save({
+      ...session,
+      messages: [{ role: 'assistant', content: 'Metrics are local.', trace }],
+    });
+    const restored = await createConversationStore(filePath).get(session.id);
+    assert.deepEqual(restored.messages[0].trace, trace);
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
+test('local conversation store migrates legacy workflow routing metrics', async () => {
+  const directory = await mkdtemp(join(tmpdir(), 'livingwords-conversations-legacy-metrics-'));
+  const filePath = join(directory, 'conversations.json');
+  const store = createConversationStore(filePath);
+  const trace = {
+    ...exampleTrace(),
+    runtime_metrics: { queue_wait_ms: 21, workflow_routing_ms: 14 },
+  };
+
+  try {
+    const session = await store.create();
+    await store.save({
+      ...session,
+      messages: [{ role: 'assistant', content: 'Metrics are local.', trace }],
+    });
+    const restored = await createConversationStore(filePath).get(session.id);
+    assert.deepEqual(restored.messages[0].trace.runtime_metrics, {
+      queue_wait_ms: 21,
+      skill_routing_ms: 14,
+    });
   } finally {
     await rm(directory, { recursive: true, force: true });
   }
@@ -613,6 +717,60 @@ test('local conversation store validates writes and requires an existing convers
         }],
       }),
       /generation duration/u,
+    );
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
+test('local conversation store preserves skill activity with its assistant message', async () => {
+  const directory = await mkdtemp(join(tmpdir(), 'livingwords-conversations-skill-selection-'));
+  const filePath = join(directory, 'conversations.json');
+  const store = createConversationStore(filePath);
+
+  try {
+    const session = await store.create();
+    const skillSelection = {
+      id: 'guided-writing',
+      name: 'Guided writing',
+      requiresConfirmation: true,
+    };
+    await store.save({
+      ...session,
+      messages: [{
+        role: 'assistant',
+        content: 'Here is the draft.',
+        skillSelection,
+      }],
+    });
+
+    const restored = await createConversationStore(filePath).get(session.id);
+    assert.deepEqual(restored.messages[0].skillSelection, skillSelection);
+    await assert.rejects(
+      store.save({
+        ...session,
+        messages: [{
+          role: 'assistant',
+          content: 'Invalid selection.',
+          skillSelection: { id: '', name: 'Guided writing' },
+        }],
+      }),
+      /invalid skill selection/u,
+    );
+    await assert.rejects(
+      store.save({
+        ...session,
+        messages: [{
+          role: 'assistant',
+          content: 'Invalid confirmation state.',
+          skillSelection: {
+            id: 'guided-writing',
+            name: 'Guided writing',
+            requiresConfirmation: 'yes',
+          },
+        }],
+      }),
+      /invalid skill selection/u,
     );
   } finally {
     await rm(directory, { recursive: true, force: true });

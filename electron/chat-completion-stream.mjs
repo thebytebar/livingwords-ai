@@ -109,8 +109,12 @@ export async function readChatCompletionStream(body, onChunk, onActivity = () =>
             throw new Error('Local assistant returned an invalid tool call.');
           }
           const previous = toolCalls.get(part.index) ?? { name: '', arguments: '' };
+          const id = part.id;
           const name = part.function?.name;
           const argumentsChunk = part.function?.arguments;
+          if (id !== undefined && typeof id !== 'string') {
+            throw new Error('Local assistant returned an invalid tool call ID.');
+          }
           if (name !== undefined && typeof name !== 'string') {
             throw new Error('Local assistant returned an invalid terminal tool name.');
           }
@@ -119,6 +123,7 @@ export async function readChatCompletionStream(body, onChunk, onActivity = () =>
           }
           previous.name += name ?? '';
           previous.arguments += argumentsChunk ?? '';
+          if (id) previous.id = id;
           if (previous.name.length > 128 || previous.arguments.length > 8_000) {
             throw new Error('Local assistant tool request is too large.');
           }

@@ -41,7 +41,7 @@ test('chat completion stream preserves output-limit finish reason', async () => 
 
 test('chat completion stream assembles structured terminal tool calls', async () => {
   const body = streamFrom([
-    'data: {"choices":[{"delta":{"tool_calls":[{"index":0,"id":"call-1","type":"function","function":{"name":"run_terminal_","arguments":"{\\"command\\":"}}]},"finish_reason":null}]}\n\n',
+    'data: {"choices":[{"delta":{"tool_calls":[{"index":0,"id":"call-1","type":"function","function":{"name":"terminal_run_","arguments":"{\\"command\\":"}}]},"finish_reason":null}]}\n\n',
     'data: {"choices":[{"delta":{"tool_calls":[{"index":0,"function":{"name":"command","arguments":"\\"pwd\\"}"}}]},"finish_reason":null}]}\n\n',
     'data: {"choices":[{"delta":{},"finish_reason":"tool_calls"}]}\n\n',
   ]);
@@ -51,7 +51,7 @@ test('chat completion stream assembles structured terminal tool calls', async ()
   assert.deepEqual(result, {
     answer: '',
     finishReason: 'tool_calls',
-    toolCalls: [{ name: 'run_terminal_command', arguments: '{"command":"pwd"}' }],
+    toolCalls: [{ id: 'call-1', name: 'terminal_run_command', arguments: '{"command":"pwd"}' }],
   });
 });
 

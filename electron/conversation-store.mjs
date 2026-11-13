@@ -79,6 +79,32 @@ function validateTrace(trace) {
   if (typeof serialized !== 'string' || Buffer.byteLength(serialized, 'utf8') > MAX_TRACE_BYTES) {
     throw new Error('Conversation agent trace exceeds the local storage limit.');
   }
+  const runtimeMetrics = trace.runtime_metrics === undefined ? undefined : (() => {
+    if (!isRecord(trace.runtime_metrics)) {
+      throw new Error('Conversation agent trace contains invalid runtime metrics.');
+    }
+    if ('skill_routing_ms' in trace.runtime_metrics && 'workflow_routing_ms' in trace.runtime_metrics) {
+      throw new Error('Conversation agent trace contains invalid runtime metrics.');
+    }
+    const metrics = {};
+    for (const [key, value] of [
+      ['queue_wait_ms', trace.runtime_metrics.queue_wait_ms],
+      ['skill_routing_ms', trace.runtime_metrics.skill_routing_ms
+        ?? trace.runtime_metrics.workflow_routing_ms],
+    ]) {
+      if (value !== undefined) {
+        if (!Number.isSafeInteger(value) || value < 0) {
+          throw new Error('Conversation agent trace contains invalid runtime metrics.');
+        }
+        metrics[key] = value;
+      }
+    }
+    const supportedMetrics = new Set(['queue_wait_ms', 'skill_routing_ms', 'workflow_routing_ms']);
+    if (Object.keys(trace.runtime_metrics).some((key) => !supportedMetrics.has(key))) {
+      throw new Error('Conversation agent trace contains invalid runtime metrics.');
+    }
+    return metrics;
+  })();
 
   const steps = trace.steps.map((step, index) => {
     if (!isRecord(step) || step.step_number !== index + 1
@@ -91,7 +117,15 @@ function validateTrace(trace) {
       || !(step.error === null || typeof step.error === 'string' && step.error.length <= 12_000)
       || !AGENT_STEP_STATUSES.has(step.status)
       || !(step.token_usage === null || isRecord(step.token_usage))
+      || (step.output_token_limit !== undefined
+        && (!Number.isSafeInteger(step.output_token_limit) || step.output_token_limit < 1))
       || !Number.isFinite(step.latency_ms) || step.latency_ms < 0
+      || ['context_assembly_ms', 'model_latency_ms', 'tool_execution_ms',
+        'input_characters_before_compaction', 'input_characters_after_compaction', 'estimated_prompt_tokens']
+        .some((key) => step[key] !== undefined
+          && (!Number.isSafeInteger(step[key]) || step[key] < 0))
+      || (step.prompt_estimate_method !== undefined
+        && !['serialized_chars_div_4', 'runtime_usage_calibrated'].includes(step.prompt_estimate_method))
       || !Array.isArray(step.guardrail_decisions) || step.guardrail_decisions.length > MAX_TRACE_COLLECTION_ITEMS
       || !Array.isArray(step.verification) || step.verification.length > MAX_TRACE_COLLECTION_ITEMS
       || (step.tool_events !== undefined && (!Array.isArray(step.tool_events)
@@ -202,7 +236,23 @@ function validateTrace(trace) {
       error: step.error,
       status: step.status,
       token_usage: tokenUsage,
+      ...(step.output_token_limit !== undefined ? { output_token_limit: step.output_token_limit } : {}),
       latency_ms: step.latency_ms,
+      ...(step.context_assembly_ms !== undefined ? { context_assembly_ms: step.context_assembly_ms } : {}),
+      ...(step.model_latency_ms !== undefined ? { model_latency_ms: step.model_latency_ms } : {}),
+      ...(step.tool_execution_ms !== undefined ? { tool_execution_ms: step.tool_execution_ms } : {}),
+      ...(step.input_characters_before_compaction !== undefined
+        ? { input_characters_before_compaction: step.input_characters_before_compaction }
+        : {}),
+      ...(step.input_characters_after_compaction !== undefined
+        ? { input_characters_after_compaction: step.input_characters_after_compaction }
+        : {}),
+      ...(step.estimated_prompt_tokens !== undefined
+        ? { estimated_prompt_tokens: step.estimated_prompt_tokens }
+        : {}),
+      ...(step.prompt_estimate_method !== undefined
+        ? { prompt_estimate_method: step.prompt_estimate_method }
+        : {}),
       guardrail_decisions: guardrailDecisions,
       verification,
       ...(toolEvents !== undefined ? { tool_events: toolEvents } : {}),
@@ -217,6 +267,7 @@ function validateTrace(trace) {
     task: trace.task,
     started_at: trace.started_at,
     completed_at: trace.completed_at,
+    ...(runtimeMetrics !== undefined ? { runtime_metrics: runtimeMetrics } : {}),
     steps,
   };
 }
@@ -293,6 +344,47 @@ function validateGenerationDuration(message) {
   return message.generationDurationMs;
 }
 
+function validateSkillSelection(message) {
+  if (message.skillSelection === undefined) return undefined;
+  const selection = message.skillSelection;
+  if (message.role !== 'assistant' || !selection || typeof selection !== 'object'
+    || Array.isArray(selection)
+    || typeof selection.id !== 'string' || !selection.id || selection.id.length > 128
+    || typeof selection.name !== 'string' || !selection.name || selection.name.length > 120
+    || (selection.requiresConfirmation !== undefined
+      && typeof selection.requiresConfirmation !== 'boolean')) {
+    throw new Error('Conversation contains an invalid skill selection.');
+  }
+  return {
+    id: selection.id,
+    name: selection.name,
+    ...(selection.requiresConfirmation === true ? { requiresConfirmation: true } : {}),
+  };
+}
+
+function validateFormattingTokens(message) {
+  if (message.formattingTokens === undefined) return undefined;
+  if (message.role !== 'user' || !Array.isArray(message.formattingTokens)
+    || message.formattingTokens.length > 100) {
+    throw new Error('Conversation contains invalid composer formatting.');
+  }
+  let previousEnd = 0;
+  return message.formattingTokens.map((token) => {
+    const kind = token?.kind === 'workflow' ? 'skill' : token?.kind;
+    if (!token || typeof token !== 'object' || Array.isArray(token)
+      || !['tool', 'skill'].includes(kind)
+      || !Number.isSafeInteger(token.start) || !Number.isSafeInteger(token.end)
+      || token.start < previousEnd || token.end <= token.start
+      || token.end > message.content.length
+      || (kind === 'tool' && !message.content.slice(token.start, token.end).startsWith('@'))
+      || (kind === 'skill' && !message.content.slice(token.start, token.end).startsWith('/'))) {
+      throw new Error('Conversation contains invalid composer formatting.');
+    }
+    previousEnd = token.end;
+    return { start: token.start, end: token.end, kind };
+  });
+}
+
 function validateSession(session) {
   if (!session || typeof session !== 'object'
     || typeof session.id !== 'string' || !session.id
@@ -333,6 +425,8 @@ function validateSession(session) {
     const sources = validateSources(message);
     const contextUsage = validateContextUsage(message);
     const generationDurationMs = validateGenerationDuration(message);
+    const skillSelection = validateSkillSelection(message);
+    const formattingTokens = validateFormattingTokens(message);
     const trace = message.trace === undefined ? undefined : validateTrace(message.trace);
     if (trace !== undefined) {
       if (message.role !== 'assistant') throw new Error('Only assistant responses can contain an agent trace.');
@@ -352,6 +446,8 @@ function validateSession(session) {
       ...(sources !== undefined ? { sources } : {}),
       ...(contextUsage !== undefined ? { contextUsage } : {}),
       ...(generationDurationMs !== undefined ? { generationDurationMs } : {}),
+      ...(skillSelection !== undefined ? { skillSelection } : {}),
+      ...(formattingTokens !== undefined ? { formattingTokens } : {}),
       ...(trace !== undefined ? { trace } : {}),
     };
   });

@@ -139,7 +139,7 @@ export function createBuiltinAgentTools({ now = () => new Date() } = {}) {
   if (typeof now !== 'function') throw new TypeError('The date-time clock must be a function.');
   return [
     {
-      name: 'calculate',
+      name: 'calculator_evaluate',
       description: 'Evaluate a bounded arithmetic expression using numbers, parentheses, +, -, *, /, %, ^, pi, e, and standard math functions (for example sqrt(2), sin(pi / 2), min(3, 5)). Angles are in radians. No code is executed.',
       permission: 'allow',
       input_schema: {
@@ -168,7 +168,7 @@ export function createBuiltinAgentTools({ now = () => new Date() } = {}) {
       },
     },
     {
-      name: 'get_local_datetime',
+      name: 'time_get_local_datetime',
       description: 'Get the device current date and time, including its configured local time zone. Use this instead of guessing the current local time.',
       permission: 'allow',
       input_schema: {

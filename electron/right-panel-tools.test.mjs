@@ -8,9 +8,9 @@ import {
 test('validates bounded right-panel snapshots and keeps browser tabs as live references', () => {
   const tabs = validateRightPanelTabs([
     {
-      id: 'trace-session',
-      kind: 'trace',
-      title: 'Activity',
+      id: 'files-session',
+      kind: 'documents',
+      title: 'Files',
       selected: true,
       content: 'Opened a web page.',
     },
@@ -25,9 +25,9 @@ test('validates bounded right-panel snapshots and keeps browser tabs as live ref
 
   assert.deepEqual(tabs, [
     {
-      id: 'trace-session',
-      kind: 'trace',
-      title: 'Activity',
+      id: 'files-session',
+      kind: 'documents',
+      title: 'Files',
       selected: true,
       content: 'Opened a web page.',
     },
@@ -41,6 +41,7 @@ test('validates bounded right-panel snapshots and keeps browser tabs as live ref
   ]);
   assert.deepEqual(validateRightPanelTabs(undefined), []);
   assert.throws(() => validateRightPanelTabs([{ ...tabs[0], kind: 'unknown' }]), /invalid tab/u);
+  assert.throws(() => validateRightPanelTabs([{ ...tabs[0], kind: 'trace' }]), /invalid tab/u);
   assert.throws(() => validateRightPanelTabs([tabs[0], tabs[0]]), /invalid tab/u);
   assert.throws(() => validateRightPanelTabs([{
     ...tabs[1],
@@ -52,8 +53,8 @@ test('validates bounded right-panel snapshots and keeps browser tabs as live ref
   }]), /invalid tab/u);
   assert.throws(() => validateRightPanelTabs([{
     id: 'large-content',
-    kind: 'trace',
-    title: 'Activity',
+    kind: 'documents',
+    title: 'Files',
     selected: true,
     content: 'x'.repeat(8_000),
   }, {
@@ -76,8 +77,8 @@ test('validates bounded right-panel snapshots and keeps browser tabs as live ref
     content: 'x'.repeat(8_000),
   }, {
     id: 'more-content',
-    kind: 'trace',
-    title: 'Earlier Activity',
+    kind: 'documents',
+    title: 'Earlier Files',
     selected: false,
     content: 'x'.repeat(8_000),
   }]), /maximum allowed size/u);
@@ -115,8 +116,8 @@ test('lists all open tabs and reads their content only when requested', async ()
     },
   });
 
-  assert.equal(listTabs.name, 'list_open_right_panel_tabs');
-  assert.equal(readTab.name, 'read_open_right_panel_tab');
+  assert.equal(listTabs.name, 'panel_list_tabs');
+  assert.equal(readTab.name, 'panel_read_tab');
   assert.deepEqual(listTabs.execute({}), [
     { id: 'search-tab', kind: 'web-search', title: 'Web Search', selected: true },
     { id: 'page-tab', kind: 'browser', title: 'example.com', selected: false },
@@ -191,4 +192,85 @@ test('limits read output and notes snapshots that were already truncated', async
   const result = await readTab.execute({ tab_id: 'terminal' });
   assert.ok(result.length <= 8_000);
   assert.match(result, /truncated to fit the available context/u);
+});
+
+test('closes Browser and Web Search tabs but cannot close other panel tabs', async () => {
+  const closed = [];
+  const tabs = validateRightPanelTabs([
+    {
+      id: 'browser-page',
+      kind: 'browser',
+      title: 'Example',
+      selected: false,
+      browserTabId: 'page-1',
+    },
+    {
+      id: 'search-results',
+      kind: 'web-search',
+      title: 'Web Search',
+      selected: true,
+      content: 'Search results',
+    },
+    {
+      id: 'files',
+      kind: 'documents',
+      title: 'Files',
+      selected: false,
+      content: 'Prior work',
+    },
+  ]);
+  const [listTabs, readTab, closeTab] = createRightPanelAgentTools({
+    tabs,
+    async readBrowserTab() {
+      return { title: 'Example', url: 'https://example.com/', text: 'Page', links: [] };
+    },
+    async closeTab(tab) {
+      closed.push({ id: tab.id, kind: tab.kind });
+    },
+  });
+
+  assert.equal(closeTab.name, 'panel_close_tab');
+  assert.equal(closeTab.validate_input({ tab_id: 'files' }),
+    'Only Browser and Web Search tabs can be closed by the assistant.');
+  assert.equal(closeTab.validate_input({ tab_id: 'missing' }), 'That right-panel tab is not open.');
+  assert.deepEqual(await closeTab.execute({ tab_id: 'browser-page' }), {
+    closed: true,
+    tab_id: 'browser-page',
+    title: 'Example',
+  });
+  assert.deepEqual(await closeTab.execute({ tab_id: 'search-results' }), {
+    closed: true,
+    tab_id: 'search-results',
+    title: 'Web Search',
+  });
+  assert.deepEqual(closed, [
+    { id: 'browser-page', kind: 'browser' },
+    { id: 'search-results', kind: 'web-search' },
+  ]);
+  assert.deepEqual(listTabs.execute({}), [
+    { id: 'files', kind: 'documents', title: 'Files', selected: false },
+  ]);
+  assert.equal(readTab.validate_input({ tab_id: 'browser-page' }), 'That right-panel tab is not open.');
+});
+
+test('keeps a tab listed if closing it fails', async () => {
+  const tabs = validateRightPanelTabs([{
+    id: 'search-results',
+    kind: 'web-search',
+    title: 'Web Search',
+    selected: true,
+    content: 'Search results',
+  }]);
+  const [listTabs, , closeTab] = createRightPanelAgentTools({
+    tabs,
+    async readBrowserTab() {
+      throw new Error('Not a Browser tab.');
+    },
+    async closeTab() {
+      throw new Error('Close failed.');
+    },
+  });
+
+  await assert.rejects(closeTab.execute({ tab_id: 'search-results' }), /Close failed/u);
+  assert.equal(listTabs.execute({})[0].id, 'search-results');
 });

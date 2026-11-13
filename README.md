@@ -1,15 +1,15 @@
 # LivingWords
 
-**Local desktop AI with trusted, private workflows for serious users.** LivingWords is a private AI for writing, thinking, planning, and working with your terminal. The model runs on your computer, and conversations stay on your device.
+**Local desktop AI with trusted, private skills for serious users.** LivingWords is a private AI for writing, thinking, planning, and working with your terminal. The model runs on your computer, and conversations stay on your device.
 
 Use it without an account, subscription, or per-prompt cloud fees. You provide the computer, storage, and power; the model needs several gigabytes of disk space and memory. LivingWords is powered by pretrained **Gemma 4 E2B Instruct** through a bundled Electron desktop app and `llama.cpp` runtime.
 
 ## What you can do
 
 - Ask questions, explore ideas, draft and revise writing, summarize, and plan.
-- Create workflows with activation guidance, steps, and goals; use the built-in workflow builder to clarify and refine new workflows in chat, then edit or delete them on the Workflows page.
+- Create skills with a short description and a free-text prompt; use the built-in skill builder to clarify and refine new skills in chat, then edit or delete them on the Skills page. Slash commands run the chosen skill, while an automatically matched skill asks for confirmation first.
 - Attach code, configuration, and other text files, PDFs, or folders to a conversation. For folder-wide questions, the assistant uses visible tool calls to inspect a bounded project overview, README files, manifests, source, and tests, then search and read more files with citations that open in the document viewer.
-- Research current information through DuckDuckGo Lite at `lite.duckduckgo.com`. Search queries go to DuckDuckGo, and its results appear in a dedicated Web Search tab; each opened page gets its own Browser tab. No API key is required.
+- Research current information by navigating directly to DuckDuckGo's HTML search page with a GET request. The Web Search tab displays DuckDuckGo's own page; clicking links opens separate Browser tabs without adding normal browser navigation controls to the search tab. The built-in Web research skill reads up to two promising pages before summarizing. No API key is required. If DuckDuckGo requests human verification, complete the challenge in the Web Search tab and retry; LivingWords never attempts to bypass verification.
 - Use deterministic arithmetic and check the device's local date and time. For software tasks, the assistant can request a single-line terminal command; it runs only after you approve that exact command in a confirmation dialog. The built-in terminal is also available for direct use.
 - Keep conversations and their context on your device; inference runs locally. Web searches and page requests leave the device, and remote content is treated as untrusted.
 
@@ -35,7 +35,7 @@ The Electron desktop app is the supported product. LivingWords does not expose a
 - **On-device inference:** bundled `llama.cpp` runtime and pinned Gemma GGUF model.
 - **On-device privacy:** prompts are processed by the local model, and conversations are stored on your device.
 - **Open source:** the LivingWords application is licensed under MIT; the bundled model has its own license and attribution.
-- **Context window:** choose 8K, 16K, 32K (default), 64K, or 128K in Settings; the response limit scales from 2K to 10K tokens.
+- **Context window:** choose 8K, 16K (default), 32K, 64K, or 128K in Settings. Final answers use the configured response cap (up to 3,000 tokens; 2,000 with the 8K window), while tool turns remain capped at 1,500 tokens. Turn limits are separate, not a cumulative request-wide budget.
 
 ## Documentation
 

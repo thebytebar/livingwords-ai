@@ -134,15 +134,15 @@ test('attached references enter context while document content waits for explici
     { id: fileReferenceId, kind: 'file', name: 'notes.md', fileCount: 1 },
     { id: folderReferenceId, kind: 'folder', name: 'project', fileCount: 2 },
   ]);
-  assert.match(run.supplemental_context.documentSearchStatus, /must be explicit|call inspect_folder/u);
+  assert.match(run.supplemental_context.documentSearchStatus, /must be explicit|call document_inspect_folder/u);
   assert.deepEqual(run.resultData(), { sources: [], contextUsage: [], retrievedDocumentIds: [] });
   assert.deepEqual(run.tools.map(({ name }) => name), [
-    'search_attached_documents',
-    'read_attached_document',
-    'inspect_folder',
-    'list_directory',
-    'read_file',
-    'grep',
+    'document_search_attached',
+    'document_read_attached',
+    'document_inspect_folder',
+    'document_list_directory',
+    'document_read_file',
+    'document_grep',
   ]);
 });
 
@@ -158,7 +158,7 @@ test('document edits use an explicit proposal callback and require the app revie
       return 'The user declined the proposed edit. The file was not changed.';
     },
   });
-  const editTool = run.tools.find(({ name }) => name === 'propose_document_edit');
+  const editTool = run.tools.find(({ name }) => name === 'document_propose_edit');
 
   assert.ok(editTool);
   assert.equal(editTool.validate_input(proposalRequest), null);
@@ -172,9 +172,9 @@ test('document edits use an explicit proposal callback and require the app revie
 
 test('document search and folder reads return bounded, traceable passages', async () => {
   const run = await createRunContext();
-  const searchTool = run.tools.find(({ name }) => name === 'search_attached_documents');
-  const documentReadTool = run.tools.find(({ name }) => name === 'read_attached_document');
-  const folderReadTool = run.tools.find(({ name }) => name === 'read_file');
+  const searchTool = run.tools.find(({ name }) => name === 'document_search_attached');
+  const documentReadTool = run.tools.find(({ name }) => name === 'document_read_attached');
+  const folderReadTool = run.tools.find(({ name }) => name === 'document_read_file');
 
   const searchResult = await searchTool.execute({ query: 'deployment' });
   assert.ok(JSON.stringify(searchResult).length <= 2_000);
@@ -214,7 +214,7 @@ test('document search and folder reads return bounded, traceable passages', asyn
 
 test('folder overview returns multiple cited project sources and a bounded inventory', async () => {
   const run = await createRunContext();
-  const inspectFolder = run.tools.find(({ name }) => name === 'inspect_folder');
+  const inspectFolder = run.tools.find(({ name }) => name === 'document_inspect_folder');
   const modelSuppliedFolderId = '111f5507-3472-a88d-a9a6-3bd3f2194232';
   assert.equal(inspectFolder.validate_input({ folderId: modelSuppliedFolderId }), null);
   const overview = await inspectFolder.execute({ folderId: modelSuppliedFolderId });
@@ -270,9 +270,9 @@ test('folder tools return useful multi-result data and expose pagination within 
     },
   });
   const run = await createRunContext(library);
-  const list = run.tools.find(({ name }) => name === 'list_directory');
-  const read = run.tools.find(({ name }) => name === 'read_file');
-  const grep = run.tools.find(({ name }) => name === 'grep');
+  const list = run.tools.find(({ name }) => name === 'document_list_directory');
+  const read = run.tools.find(({ name }) => name === 'document_read_file');
+  const grep = run.tools.find(({ name }) => name === 'document_grep');
 
   const listing = await list.execute({ folderId: folderReferenceId });
   assert.equal(listing.entries.length, 30);
@@ -294,8 +294,8 @@ test('folder tools return useful multi-result data and expose pagination within 
 
 test('document tools reject references outside the attached conversation', async () => {
   const run = await createRunContext();
-  const folderReadTool = run.tools.find(({ name }) => name === 'read_file');
-  const searchTool = run.tools.find(({ name }) => name === 'search_attached_documents');
+  const folderReadTool = run.tools.find(({ name }) => name === 'document_read_file');
+  const searchTool = run.tools.find(({ name }) => name === 'document_search_attached');
 
   assert.equal(folderReadTool.validate_input({
     folderId: '00000000-0000-4000-8000-000000000999',
@@ -323,7 +323,7 @@ test('document tools reject references outside the attached conversation', async
     task: 'Compare attached folders.',
     maxContextCharacters: 32_768,
   });
-  const multiFolderRead = multipleFolders.tools.find(({ name }) => name === 'read_file');
+  const multiFolderRead = multipleFolders.tools.find(({ name }) => name === 'document_read_file');
   assert.match(multiFolderRead.validate_input({
     folderId: '00000000-0000-4000-8000-000000000999',
     path: 'README.md',
@@ -415,12 +415,12 @@ test('agent context uses the real local library for attached files, retrieval, s
 
     assert.deepEqual(run.supplemental_context.sources, []);
     assert.deepEqual(run.resultData().contextUsage, []);
-    const search = run.tools.find(({ name }) => name === 'search_attached_documents');
+    const search = run.tools.find(({ name }) => name === 'document_search_attached');
     const searchResult = await search.execute({ query: 'deployment local build' });
     assert.ok(JSON.stringify(searchResult).length <= 2_000);
     assert.match(searchResult.passages[0].excerpt, /Deployment uses a local build process/u);
 
-    const readDocument = run.tools.find(({ name }) => name === 'read_attached_document');
+    const readDocument = run.tools.find(({ name }) => name === 'document_read_attached');
     const documentResult = await readDocument.execute({
       documentId: searchResult.passages[0].documentId,
       query: 'deployment',
@@ -428,7 +428,7 @@ test('agent context uses the real local library for attached files, retrieval, s
     assert.ok(documentResult.passage);
     assert.equal(documentResult.passage.documentId, searchResult.passages[0].documentId);
 
-    const inspectFolder = run.tools.find(({ name }) => name === 'inspect_folder');
+    const inspectFolder = run.tools.find(({ name }) => name === 'document_inspect_folder');
     const overview = await inspectFolder.execute({ folderId: folderReference.id });
     assert.ok(overview.passages.length >= 4);
     assert.ok(overview.passages.some(({ name }) => name === 'README.md'));
@@ -439,7 +439,7 @@ test('agent context uses the real local library for attached files, retrieval, s
     assert.equal(JSON.stringify(overview).includes('do-not-return'), false);
     assert.ok(JSON.stringify(overview).length <= 8_000);
 
-    const readFileTool = run.tools.find(({ name }) => name === 'read_file');
+    const readFileTool = run.tools.find(({ name }) => name === 'document_read_file');
     const fileResult = await readFileTool.execute({
       folderId: folderReference.id,
       path: join('src', 'overview.md'),

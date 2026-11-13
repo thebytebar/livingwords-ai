@@ -6,13 +6,13 @@ import test from 'node:test';
 import { createContextSettingsStore } from './context-settings-store.mjs';
 import { DEFAULT_WEB_SEARCH_PROVIDER } from './web-search.mjs';
 
-test('context settings default to 32K and persist a supported selection', async () => {
+test('context settings default to 16K and persist a supported selection', async () => {
   const root = await mkdtemp(join(tmpdir(), 'livingwords-context-settings-'));
   const path = join(root, 'preferences.json');
   const store = createContextSettingsStore(path);
 
   try {
-    assert.equal(await store.load(), 32_768);
+    assert.equal(await store.load(), 16_384);
     await store.save(65_536);
     assert.equal(await store.load(), 65_536);
     assert.deepEqual(JSON.parse(await readFile(path, 'utf8')), { contextWindowTokens: 65_536 });
@@ -21,7 +21,7 @@ test('context settings default to 32K and persist a supported selection', async 
   }
 });
 
-test('web search settings default to DuckDuckGo Lite and persist the selected provider', async () => {
+test('web search settings default to DuckDuckGo and persist the selected provider', async () => {
   const root = await mkdtemp(join(tmpdir(), 'livingwords-context-settings-'));
   const path = join(root, 'preferences.json');
   const store = createContextSettingsStore(path);
@@ -32,7 +32,7 @@ test('web search settings default to DuckDuckGo Lite and persist the selected pr
       provider: 'duckduckgo',
     });
     assert.deepEqual(await store.loadWebSearchSettings(), { provider: 'duckduckgo' });
-    assert.equal(await store.load(), 32_768);
+    assert.equal(await store.load(), 16_384);
     const saved = JSON.parse(await readFile(path, 'utf8'));
     assert.equal(saved.webSearchProvider, 'duckduckgo');
     await store.save(65_536);
