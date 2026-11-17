@@ -5,6 +5,7 @@ import { join } from 'node:path';
 import test from 'node:test';
 import {
   ASK_THE_BIBLE_SKILL,
+  ASK_THEOLOGIAN_SKILL,
   createSkillStore,
   WEB_RESEARCH_SKILL,
   SKILL_BUILDER,
@@ -22,7 +23,7 @@ test('skill store includes protected built-in skills by default', async () => {
 
   try {
     const skills = await store.list();
-    assert.equal(skills.length, 3);
+    assert.equal(skills.length, 4);
     assert.equal(skills[0]?.id, SKILL_BUILDER.id);
     assert.equal(skills[0]?.source, 'builtin');
     assert.ok(skills[0]?.description);
@@ -32,6 +33,9 @@ test('skill store includes protected built-in skills by default', async () => {
     assert.equal(skills[2]?.id, ASK_THE_BIBLE_SKILL.id);
     assert.equal(skills[2]?.source, 'builtin');
     assert.equal(skills[2]?.prompt, ASK_THE_BIBLE_SKILL.prompt);
+    assert.equal(skills[3]?.id, ASK_THEOLOGIAN_SKILL.id);
+    assert.equal(skills[3]?.source, 'builtin');
+    assert.equal(skills[3]?.prompt, ASK_THEOLOGIAN_SKILL.prompt);
   } finally {
     await rm(root, { recursive: true, force: true });
   }
@@ -63,6 +67,44 @@ test('unchanged custom Ask The Bible skill migrates to the built-in skill', asyn
   }
 });
 
+test('unchanged custom Ask a Theologian skill migrates to the built-in skill', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'livingwords-skills-'));
+  const path = join(root, 'skills.json');
+  const legacyCustomSkill = {
+    ...ASK_THEOLOGIAN_SKILL,
+    id: 'custom-bc236a7d-6d1d-45f2-91eb-6586a635732f',
+  };
+  const customizedSkill = {
+    ...legacyCustomSkill,
+    id: 'custom-theologian-edited',
+    prompt: `${legacyCustomSkill.prompt}\n\nPrefer concise answers.`,
+  };
+  const customizedDescriptionSkill = {
+    ...legacyCustomSkill,
+    id: 'custom-theologian-description',
+    description: 'A more concise Bible-only theological guide.',
+  };
+
+  try {
+    await writeFile(path, JSON.stringify({
+      schema_version: 1,
+      skills: [legacyCustomSkill, customizedSkill, customizedDescriptionSkill],
+    }));
+    const store = createSkillStore(path);
+    const listed = await store.list();
+    assert.equal(listed.filter(({ name }) => name === 'Ask a Theologian').length, 3);
+    assert.equal(listed.find(({ id }) => id === ASK_THEOLOGIAN_SKILL.id)?.source, 'builtin');
+    assert.equal(listed.find(({ id }) => id === customizedSkill.id)?.source, 'custom');
+    assert.equal(listed.find(({ id }) => id === customizedDescriptionSkill.id)?.source, 'custom');
+    assert.deepEqual(JSON.parse(await readFile(path, 'utf8')), {
+      schema_version: 1,
+      skills: [customizedSkill, customizedDescriptionSkill],
+    });
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
 test('customized legacy bundled skills migrate to regular user skills', async () => {
   const root = await mkdtemp(join(tmpdir(), 'livingwords-skills-'));
   const path = join(root, 'skills.json');
@@ -82,7 +124,7 @@ test('customized legacy bundled skills migrate to regular user skills', async ()
     }));
     const store = createSkillStore(path);
     const listed = await store.list();
-    assert.equal(listed.length, 4);
+    assert.equal(listed.length, 5);
     const migrated = listed.find((skill) => skill.id === 'web-research');
     assert.equal(migrated?.name, 'Deep web research');
     assert.match(migrated?.description ?? '', /Use when the user explicitly asks for deep web research/u);
@@ -126,6 +168,7 @@ test('custom skills can be created, edited, and deleted', async () => {
       SKILL_BUILDER.id,
       WEB_RESEARCH_SKILL.id,
       ASK_THE_BIBLE_SKILL.id,
+      ASK_THEOLOGIAN_SKILL.id,
     ]);
   } finally {
     await rm(root, { recursive: true, force: true });
@@ -242,6 +285,7 @@ test('legacy skill order is ignored and removed on the next save', async () => {
       SKILL_BUILDER.id,
       WEB_RESEARCH_SKILL.id,
       ASK_THE_BIBLE_SKILL.id,
+      ASK_THEOLOGIAN_SKILL.id,
       custom.id,
     ]);
     await store.save({ ...custom, name: 'Updated guide' });

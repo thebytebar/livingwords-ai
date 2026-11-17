@@ -257,7 +257,7 @@ let skillIsNew = false;
 let skillEditorDirty = false;
 let skillToolMention = null;
 let skillToolOptions = [];
-let skillToolOptionIndex = 0;
+let skillToolOptionIndex = -1;
 let skillToolMentionField = null;
 let activeWorkspace = 'sessions';
 let libraryDocuments = [];
@@ -675,6 +675,44 @@ function syncSelectedToolNames() {
     .map((chip) => chip.dataset.selectedToolChip);
 }
 
+function isPromptCaretPlaceholder(node) {
+  return node?.nodeType === Node.ELEMENT_NODE
+    && node.hasAttribute('data-prompt-caret-placeholder');
+}
+
+function clearPromptCaretPlaceholder() {
+  const placeholder = prompt.querySelector('[data-prompt-caret-placeholder]');
+  if (!placeholder) return;
+  const selection = window.getSelection();
+  if (placeholder.textContent === '\u200B') {
+    if (selection?.rangeCount && placeholder.contains(selection.anchorNode)) {
+      const range = document.createRange();
+      range.setStartBefore(placeholder);
+      range.collapse(true);
+      selection.removeAllRanges();
+      selection.addRange(range);
+    }
+    placeholder.remove();
+    return;
+  }
+  placeholder.removeAttribute('data-prompt-caret-placeholder');
+  const walker = document.createTreeWalker(placeholder, NodeFilter.SHOW_TEXT);
+  while (walker.nextNode()) {
+    const textNode = walker.currentNode;
+    const value = textNode.nodeValue ?? '';
+    const cleanValue = value.replace(/\u200B/gu, '');
+    if (value === cleanValue) continue;
+    const anchorOffset = selection?.anchorNode === textNode ? selection.anchorOffset : null;
+    const removedBeforeAnchor = anchorOffset === null
+      ? 0
+      : (value.slice(0, anchorOffset).match(/\u200B/gu) ?? []).length;
+    textNode.nodeValue = cleanValue;
+    if (anchorOffset !== null) {
+      selection.collapse(textNode, anchorOffset - removedBeforeAnchor);
+    }
+  }
+}
+
 function promptText(mode = 'plain', formattingTokens = null) {
   let text = '';
   let collapseSpaceAfterChip = false;
@@ -706,6 +744,7 @@ function promptText(mode = 'plain', formattingTokens = null) {
       }
       return;
     }
+    if (isPromptCaretPlaceholder(node)) return;
     if (node.nodeType === Node.TEXT_NODE) {
       append(node.nodeValue ?? '');
       return;
@@ -746,6 +785,10 @@ function promptCaretOffset() {
       length += 1;
       return;
     }
+    if (isPromptCaretPlaceholder(node)) {
+      if (node.contains(anchorNode)) caret = length;
+      return;
+    }
     if (node.nodeType === Node.TEXT_NODE) {
       length += node.nodeValue?.length ?? 0;
       return;
@@ -767,6 +810,15 @@ function promptPointAt(offset) {
     if (point) return;
     if (isComposerChip(node)) {
       length += 1;
+      return;
+    }
+    if (isPromptCaretPlaceholder(node)) {
+      if (offset === length && node.parentNode) {
+        point = {
+          node: node.parentNode,
+          offset: [...node.parentNode.childNodes].indexOf(node),
+        };
+      }
       return;
     }
     if (node.nodeType === Node.TEXT_NODE) {
@@ -848,13 +900,14 @@ function replaceMentionWithChip(mention, chip) {
 }
 
 function insertPromptText(value) {
+  clearPromptCaretPlaceholder();
   const selection = window.getSelection();
   const range = selection?.rangeCount ? selection.getRangeAt(0) : null;
+  const text = document.createTextNode(value.replace(/\r\n?/gu, '\n'));
   if (!range || !prompt.contains(range.startContainer)) {
-    prompt.append(document.createTextNode(value));
+    prompt.append(text);
   } else {
     range.deleteContents();
-    const text = document.createTextNode(value);
     range.insertNode(text);
     range.setStartAfter(text);
     range.collapse(true);
@@ -862,6 +915,37 @@ function insertPromptText(value) {
     selection.addRange(range);
   }
   prompt.dispatchEvent(new Event('input', { bubbles: true }));
+}
+
+function insertPromptLineBreak() {
+  clearPromptCaretPlaceholder();
+  const selection = window.getSelection();
+  const range = selection?.rangeCount ? selection.getRangeAt(0) : null;
+  const lineBreak = document.createElement('br');
+  const placeholder = document.createElement('span');
+  placeholder.dataset.promptCaretPlaceholder = '';
+  placeholder.textContent = '\u200B';
+  if (!range || !prompt.contains(range.startContainer)) {
+    prompt.append(lineBreak, placeholder);
+    const insertionRange = document.createRange();
+    insertionRange.setStartBefore(placeholder);
+    insertionRange.collapse(true);
+    selection.removeAllRanges();
+    selection.addRange(insertionRange);
+  } else {
+    range.deleteContents();
+    range.insertNode(lineBreak);
+    range.setStartAfter(lineBreak);
+    range.insertNode(placeholder);
+    range.setStartBefore(placeholder);
+    range.collapse(true);
+    selection.removeAllRanges();
+    selection.addRange(range);
+  }
+  prompt.dispatchEvent(new InputEvent('input', {
+    bubbles: true,
+    inputType: 'insertLineBreak',
+  }));
 }
 
 function closeToolSuggestions() {
@@ -3718,10 +3802,12 @@ messages.addEventListener('click', (event) => {
     reportBrowserNavigationError(sessionId, browserTab.browserTabId, error, 'Could not open web link');
   });
 });
-$('question').addEventListener('input', () => {
+$('question').addEventListener('input', (event) => {
+  if (event.inputType !== 'insertLineBreak') clearPromptCaretPlaceholder();
   syncSelectedToolNames();
   syncSelectedSkillCommand();
-  if (prompt.childNodes.length === 1 && prompt.firstChild.nodeName === 'BR') {
+  if (prompt.childNodes.length === 1 && prompt.firstChild.nodeName === 'BR'
+    && !prompt.firstChild.hasAttribute('data-prompt-line-break')) {
     prompt.replaceChildren();
   }
   updateToolSuggestions();
@@ -3768,7 +3854,7 @@ prompt.addEventListener('keydown', (event) => {
     $('composer').requestSubmit();
   } else if (event.key === 'Enter' && event.shiftKey && !event.isComposing) {
     event.preventDefault();
-    insertPromptText('\n');
+    insertPromptLineBreak();
   }
 });
 prompt.addEventListener('paste', (event) => {
@@ -4089,7 +4175,7 @@ function closeSkillToolSuggestions() {
   skillToolMentionField = null;
   skillToolMention = null;
   skillToolOptions = [];
-  skillToolOptionIndex = 0;
+  skillToolOptionIndex = -1;
   $('skill-tool-suggestions').hidden = true;
   $('skill-tool-suggestions').replaceChildren();
 }
@@ -4142,10 +4228,14 @@ function renderSkillToolSuggestions() {
       option.append(name, details);
       suggestions.append(option);
     });
-    skillToolMentionField?.setAttribute(
-      'aria-activedescendant',
-      `skill-tool-option-${skillToolOptionIndex}`,
-    );
+    if (skillToolOptionIndex >= 0) {
+      skillToolMentionField?.setAttribute(
+        'aria-activedescendant',
+        `skill-tool-option-${skillToolOptionIndex}`,
+      );
+    } else {
+      skillToolMentionField?.removeAttribute('aria-activedescendant');
+    }
     suggestions.querySelector('[aria-selected="true"]')?.scrollIntoView({ block: 'nearest' });
   }
   suggestions.hidden = false;
@@ -4171,7 +4261,7 @@ function updateSkillToolSuggestions(field) {
   skillToolMentionField = field;
   skillToolMention = mention;
   skillToolOptions = filterToolCatalog(TOOL_CATALOG, mention.query);
-  if (mentionChanged) skillToolOptionIndex = 0;
+  if (mentionChanged) skillToolOptionIndex = -1;
   renderSkillToolSuggestions();
 }
 
@@ -4209,14 +4299,17 @@ $('skill-editor').addEventListener('keydown', (event) => {
     || skillToolMentionField !== field) return;
   if (event.key === 'ArrowDown' && skillToolOptions.length > 0) {
     event.preventDefault();
-    skillToolOptionIndex = (skillToolOptionIndex + 1) % skillToolOptions.length;
+    skillToolOptionIndex = skillToolOptionIndex < 0
+      ? 0
+      : (skillToolOptionIndex + 1) % skillToolOptions.length;
     renderSkillToolSuggestions();
   } else if (event.key === 'ArrowUp' && skillToolOptions.length > 0) {
     event.preventDefault();
-    skillToolOptionIndex = (skillToolOptionIndex - 1 + skillToolOptions.length)
-      % skillToolOptions.length;
+    skillToolOptionIndex = skillToolOptionIndex < 0
+      ? skillToolOptions.length - 1
+      : (skillToolOptionIndex - 1 + skillToolOptions.length) % skillToolOptions.length;
     renderSkillToolSuggestions();
-  } else if (event.key === 'Enter' && skillToolOptions.length > 0) {
+  } else if (event.key === 'Enter' && !event.shiftKey && skillToolOptionIndex >= 0) {
     event.preventDefault();
     selectSkillToolMention(skillToolOptions[skillToolOptionIndex].name);
   } else if (event.key === 'Escape') {
